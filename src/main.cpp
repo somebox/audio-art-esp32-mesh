@@ -1,6 +1,7 @@
 //************************************************************
-// this is a simple example that uses the easyMesh library
+// combining I2S audio, PainlessMesh and other things for art
 //
+// (mesh example:)
 // 1. blinks led once for every node on the mesh
 // 2. blink cycle repeats every BLINK_PERIOD
 // 3. sends a silly message to every node on the mesh at a random time between 1 and 5 seconds
@@ -8,18 +9,28 @@
 //
 //
 //************************************************************
+#include "Arduino.h"
 #include <painlessMesh.h>
+#include "Audio.h"
+#include "SD.h"
+#include "FS.h"
 
-// some gpio pin that is connected to an LED...
-// on my rig, this is 5, change to the right number of your LED.
-#define   LED             2       // GPIO number of connected LED, ON ESP-12 IS GPIO2
-
+// PainlessMesh
 #define   BLINK_PERIOD    3000 // milliseconds until cycle repeat
 #define   BLINK_DURATION  100  // milliseconds LED is on for
-
 #define   MESH_SSID       "artnet"
 #define   MESH_PASSWORD   "loh6eiRoo2Ahrie"
 #define   MESH_PORT       5555
+
+// Digital I/O used
+#define SD_CS          5
+#define SPI_MOSI      23
+#define SPI_MISO      19
+#define SPI_SCK       18
+#define I2S_DOUT      25
+#define I2S_BCLK      27
+#define I2S_LRC       26
+#define LED            2
 
 // Prototypes
 void sendMessage(); 
@@ -31,6 +42,7 @@ void delayReceivedCallback(uint32_t from, int32_t delay);
 
 Scheduler     userScheduler; // to control your personal task
 painlessMesh  mesh;
+Audio audio;
 
 bool calc_delay = false;
 SimpleList<uint32_t> nodes;
@@ -47,8 +59,18 @@ void setup() {
 
   pinMode(LED, OUTPUT);
 
-  mesh.setDebugMsgTypes(ERROR | DEBUG);  // set before init() so that you can see error messages
+  // audio setup
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
+  SD.begin(SD_CS);
+  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+  audio.setVolume(17); // 0...21
+  audio.connecttoFS(SD, "/24-answer.mp3");
 
+  // mesh setup
+
+  mesh.setDebugMsgTypes(ERROR | DEBUG);  // set before init() so that you can see error messages
   mesh.init(MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT);
   mesh.onReceive(&receivedCallback);
   mesh.onNewConnection(&newConnectionCallback);
@@ -85,6 +107,7 @@ void setup() {
 
 void loop() {
   mesh.update();
+  audio.loop();
   digitalWrite(LED, !onFlag);
 }
 
