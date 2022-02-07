@@ -10,8 +10,11 @@ The networking is based on PainlessMesh, and requires no WIFI access point to wo
 
 The audio is handled by the I2SAudio library, and samples are played from an SD card. Other connections are made via gate or CV signals, and lights and devices are controlled by triggering relays or using PWM-controlled mosfets.
 
-The performance given defines a total of 6 nodes: two audio players, three synth controllers, and a single coordinator/conductor. Several nodes had speakers connected, or lights/LEDs. 
+The performance given defines a total of 6 nodes: two audio players, three synth controllers, and a single coordinator/conductor. Several nodes had speakers connected, or lights/LEDs.
+
+The MP3 audio files were generated with the Amazon AWS "Polly" text-to-speech service, fed from a list of GPT-3's answers stored in a plaintext file, and rendered with [this simple Python script](https://github.com/somebox/aws-polly-python-example).
 
 ## Installation
 
 Each node runs the same code, and will act depending on the role selected. When uploading firmware to the ESP32 boards, it is neccessary to change the `NODE_ROLE` value to one of the recognized names. 
+
