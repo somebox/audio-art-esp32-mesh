@@ -31,7 +31,8 @@
 #define I2S_DOUT      25
 #define I2S_BCLK      27
 #define I2S_LRC       26
-#define LED            2
+#define LED_STATUS     2
+#define LED_LEVEL     15
 #define BUTTON1       17
 #define BUTTON2       16
 
@@ -53,6 +54,7 @@ EasyButton statusButton(BUTTON2); // info
 
 bool calc_delay = false;
 int question_number = 0;
+int breathing;
 SimpleList<uint32_t> nodes;
 
 void sendMessage() ; // Prototype
@@ -66,8 +68,13 @@ void setup() {
   Serial.begin(115200);
 
   // UI controls
-  pinMode(LED, OUTPUT);
-  //pinMode(BUTTON1, INPUT_PULLDOWN);
+  pinMode(LED_STATUS, OUTPUT);
+  ledcSetup(0, 1000, 10);   // chan 0, 1kHz, 10-bit
+  ledcAttachPin(LED_LEVEL, 0); // chan 0
+  nextButton.begin();
+  nextButton.onPressed(nextTrack);
+  statusButton.begin();
+  statusButton.onPressed(status);
 
   // audio setup
   pinMode(SD_CS, OUTPUT);
@@ -88,11 +95,6 @@ void setup() {
 
   userScheduler.addTask( taskSendMessage );
   taskSendMessage.enable();
-
-  nextButton.begin();
-  nextButton.onPressed(nextTrack);
-  statusButton.begin();
-  statusButton.onPressed(status);
 
   blinkNoNodes.set(BLINK_PERIOD, (mesh.getNodeList().size() + 1) * 2, []() {
       // If on, switch off, else switch on
@@ -123,7 +125,9 @@ void loop() {
   audio.loop();
   nextButton.read();
   statusButton.read();
-  digitalWrite(LED, onFlag);
+  digitalWrite(LED_STATUS, onFlag);
+  int breathing = abs((int)millis() % 2000 - 1000)/10;   // triangle wave, 0.5Hz, 0..100
+  ledcWrite(0, (int) max(0, (int)(mesh.stability*0.9) - breathing));
 }
 
 // called when button pressed
