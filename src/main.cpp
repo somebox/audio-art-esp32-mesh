@@ -10,6 +10,7 @@
 //
 //************************************************************
 #include "Arduino.h"
+#include <EasyButton.h>
 #include <painlessMesh.h>
 #include "Audio.h"
 #include "SD.h"
@@ -17,7 +18,7 @@
 
 // PainlessMesh
 #define   BLINK_PERIOD    3000 // milliseconds until cycle repeat
-#define   BLINK_DURATION  100  // milliseconds LED is on for
+#define   BLINK_DURATION  200  // milliseconds LED is on for
 #define   MESH_SSID       "artnet"
 #define   MESH_PASSWORD   "loh6eiRoo2Ahrie"
 #define   MESH_PORT       5555
@@ -31,6 +32,8 @@
 #define I2S_BCLK      27
 #define I2S_LRC       26
 #define LED            2
+#define BUTTON1       17
+#define BUTTON2       16
 
 // Prototypes
 void sendMessage(); 
@@ -39,12 +42,17 @@ void newConnectionCallback(uint32_t nodeId);
 void changedConnectionCallback(); 
 void nodeTimeAdjustedCallback(int32_t offset); 
 void delayReceivedCallback(uint32_t from, int32_t delay);
+void nextTrack();
+void status();
 
 Scheduler     userScheduler; // to control your personal task
 painlessMesh  mesh;
 Audio audio;
+EasyButton nextButton(BUTTON1); // skip track
+EasyButton statusButton(BUTTON2); // info
 
 bool calc_delay = false;
+int question_number = 0;
 SimpleList<uint32_t> nodes;
 
 void sendMessage() ; // Prototype
@@ -57,7 +65,9 @@ bool onFlag = false;
 void setup() {
   Serial.begin(115200);
 
+  // UI controls
   pinMode(LED, OUTPUT);
+  //pinMode(BUTTON1, INPUT_PULLDOWN);
 
   // audio setup
   pinMode(SD_CS, OUTPUT);
@@ -66,10 +76,8 @@ void setup() {
   SD.begin(SD_CS);
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(17); // 0...21
-  audio.connecttoFS(SD, "/24-answer.mp3");
 
   // mesh setup
-
   mesh.setDebugMsgTypes(ERROR | DEBUG);  // set before init() so that you can see error messages
   mesh.init(MESH_SSID, MESH_PASSWORD, &userScheduler, MESH_PORT);
   mesh.onReceive(&receivedCallback);
@@ -80,6 +88,11 @@ void setup() {
 
   userScheduler.addTask( taskSendMessage );
   taskSendMessage.enable();
+
+  nextButton.begin();
+  nextButton.onPressed(nextTrack);
+  statusButton.begin();
+  statusButton.onPressed(status);
 
   blinkNoNodes.set(BLINK_PERIOD, (mesh.getNodeList().size() + 1) * 2, []() {
       // If on, switch off, else switch on
@@ -108,11 +121,46 @@ void setup() {
 void loop() {
   mesh.update();
   audio.loop();
-  digitalWrite(LED, !onFlag);
+  nextButton.read();
+  statusButton.read();
+  digitalWrite(LED, onFlag);
+}
+
+// called when button pressed
+void nextTrack(){
+  char filename[80];
+  sprintf(filename, "/%02d-answer.mp3", question_number+1); // filenames start with 1
+  Serial.printf("button: next (%s)\n", filename);
+  audio.connecttoFS(SD, filename); // start playback (async)  
+  mesh.sendBroadcast(filename);
+  question_number = (question_number + 1) % 26;  //  increment, limit to 0-25
+}
+
+void status(){
+  Serial.println("-----------------");
+  Serial.print("station id: ");
+  Serial.println(mesh.getNodeId());
+  Serial.printf("mesh time: %zu\n", mesh.getNodeTime());
+  Serial.printf("mesh stability: %d\n", mesh.stability);
+   
+  nodes = mesh.getNodeList();
+  Serial.printf("Num nodes: %d\n", nodes.size());
+  Serial.printf("mesh nodes: ");
+  SimpleList<uint32_t>::iterator node = nodes.begin();
+  while (node != nodes.end()) {
+    Serial.printf(" %u", *node);
+    node++;
+  }
+  Serial.println();
+
+  Serial.print("mesh sub-connections: ");
+  Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
+
+  Serial.println("-----------------");
 }
 
 void sendMessage() {
-  String msg = "Hello from node ";
+  String msg = "Status from node ";
   msg += mesh.getNodeId();
   msg += " myFreeMemory: " + String(ESP.getFreeHeap());
   mesh.sendBroadcast(msg);
@@ -127,13 +175,16 @@ void sendMessage() {
   }
 
   Serial.printf("Sending message: %s\n", msg.c_str());
-  
-  taskSendMessage.setInterval( random(TASK_SECOND * 1, TASK_SECOND * 5));  // between 1 and 5 seconds
+  taskSendMessage.setInterval( random(TASK_SECOND * 3, TASK_SECOND * 6));  // between 1 and 5 seconds
 }
 
 
 void receivedCallback(uint32_t from, String & msg) {
-  Serial.printf("startHere: Received from %u msg=%s\n", from, msg.c_str());
+  if (msg.startsWith("/")){
+    Serial.printf("starting playback of %s", msg.c_str());
+    audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
+  }
+  Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
 }
 
 void newConnectionCallback(uint32_t nodeId) {
@@ -142,8 +193,8 @@ void newConnectionCallback(uint32_t nodeId) {
   blinkNoNodes.setIterations((mesh.getNodeList().size() + 1) * 2);
   blinkNoNodes.enableDelayed(BLINK_PERIOD - (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
  
-  Serial.printf("--> startHere: New Connection, nodeId = %u\n", nodeId);
-  Serial.printf("--> startHere: New Connection, %s\n", mesh.subConnectionJson(true).c_str());
+  Serial.printf("* New Connection, nodeId = %u\n", nodeId);
+  Serial.printf("  JSON: %s\n", mesh.subConnectionJson(true).c_str());
 }
 
 void changedConnectionCallback() {
@@ -152,18 +203,7 @@ void changedConnectionCallback() {
   onFlag = false;
   blinkNoNodes.setIterations((mesh.getNodeList().size() + 1) * 2);
   blinkNoNodes.enableDelayed(BLINK_PERIOD - (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
- 
-  nodes = mesh.getNodeList();
-
-  Serial.printf("Num nodes: %d\n", nodes.size());
-  Serial.printf("Connection list:");
-
-  SimpleList<uint32_t>::iterator node = nodes.begin();
-  while (node != nodes.end()) {
-    Serial.printf(" %u", *node);
-    node++;
-  }
-  Serial.println();
+  status();
   calc_delay = true;
 }
 
@@ -173,4 +213,37 @@ void nodeTimeAdjustedCallback(int32_t offset) {
 
 void delayReceivedCallback(uint32_t from, int32_t delay) {
   Serial.printf("Delay to node %u is %d us\n", from, delay);
+}
+
+// i2s audio callbacks
+
+void audio_info(const char *info){
+    Serial.print("info        "); Serial.println(info);
+}
+void audio_id3data(const char *info){  //id3 metadata
+    Serial.print("id3data     ");Serial.println(info);
+}
+void audio_eof_mp3(const char *info){  //end of file
+    Serial.print("eof_mp3     ");Serial.println(info);
+}
+void audio_showstation(const char *info){
+    Serial.print("station     ");Serial.println(info);
+}
+void audio_showstreamtitle(const char *info){
+    Serial.print("streamtitle ");Serial.println(info);
+}
+void audio_bitrate(const char *info){
+    Serial.print("bitrate     ");Serial.println(info);
+}
+void audio_commercial(const char *info){  //duration in sec
+    Serial.print("commercial  ");Serial.println(info);
+}
+void audio_icyurl(const char *info){  //homepage
+    Serial.print("icyurl      ");Serial.println(info);
+}
+void audio_lasthost(const char *info){  //stream URL played
+    Serial.print("lasthost    ");Serial.println(info);
+}
+void audio_eof_speech(const char *info){
+    Serial.print("eof_speech  ");Serial.println(info);
 }
