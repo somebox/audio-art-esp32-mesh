@@ -14,6 +14,66 @@ The performance given defines a total of 6 nodes: two audio players, three synth
 
 The MP3 audio files were generated with the Amazon AWS "Polly" text-to-speech service, fed from a list of GPT-3's answers stored in a plaintext file, and rendered with [this simple Python script](https://github.com/somebox/aws-polly-python-example).
 
+## Flow Diagram
+
+```
+                ╔══════════════════════════════╗                 
+                ║          STATE FLOW          ║                 
+                ╚══════════════════════════════╝                                                           
+                                                                 
+     ┌────────────────────────────────────────────────────┐      
+     │                                                    │      
+     ▼                                                    │      
+┌─────────┐         ┌────────────┐       ┌────────────┐   │      
+│         │         │            │       │            │   │      
+│  Start  │     ┌──▶│  Question  │   ┌──▶│   Answer   │   │      
+│         │     │   │            │   │   │            │   │      
+└─────────┘     │   └────────────┘   │   └────────────┘   │      
+     │          │          │         │          │         │      
+     │          │          │         │          │         │      
+     │          │          │         │          │         │      
+     │   ┌────────────┐    │  ┌────────────┐    │  ┌────────────┐
+     │   │            │    │  │            │    │  │            │
+     └──▶│   Pause    │    └─▶│   Pause    │    └─▶│   Pause    │
+         │            │       │            │       │            │
+         └────────────┘       └────────────┘       └────────────┘
+```
+In the Start state, the current cycle is initialized. The question counter is incremented, and a pause is started on the controller. The first question is triggered, and after it is completed, another pause begins. Finally the answer is triggered, folled by a final pause, and the cycle begins again.
+
+There are three ESP32 devices on the mesh which serve different roles: 
+
+```
+    ╔══════════════════════════════╗    
+    ║           HARDWARE           ║    
+    ╚══════════════════════════════╝    
+                                        
+                ┌ ─ ─ ─ ┐     ┌ ─ ─ ─ ┐ 
+                  AUDIO         AUDIO   
+                └ ─ ─ ─ ┘     └ ─ ─ ─ ┘ 
+                    ▲             ▲     
+                    │             │     
+┌─────────┐    ┌─────────┐   ┌─────────┐
+│ ┌┐   ┌┐ │    │ ┌┐   ┌┐ │   │ ┌┐   ┌┐ │
+│ └┘   └┘ │    │ └┘   └┘ │   │ └┘   └┘ │
+│ ┌─┐     │    │ ┌─┐     │   │ ┌─┐     │
+│ │ │     │    │ │ │     │   │ │ │     │
+│ └─┘     │    │ └─┘     │   │ └─┘     │
+│ ┌─────┐ │    │ ┌─────┐ │   │ ┌─────┐ │
+│ │     │ │    │ │     │ │   │ │     │ │
+│ │     │ │    │ │     │ │   │ │     │ │
+│ │ESP32│ │    │ │ESP32│ │   │ │ESP32│ │
+│ │     │ │    │ │     │ │   │ │     │ │
+└─┴─────┴─┘    └─┴─────┴─┘   └─┴─────┴─┘
+                                        
+Controller      Questions      Answers  
+```
+
+Controller node: Orchestrates the performance, the order of questions, the pauses, and other parameters.
+Question node: Plays back mp3 samples for the pre-recorded human questions.
+Answer node: Plays back mp3 samples for the GPT-3 speech-synthsized answers.
+
+Pauses may be random in length. Using the wireless mesh, events are published, such as triggering mp3 playback, or 
+notifying when that track is finished. 
 ## Installation
 
 Each node runs the same code, and will act depending on the role selected. When uploading firmware to the ESP32 boards, it is neccessary to change the `NODE_ROLE` value to one of the recognized names. 
