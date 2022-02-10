@@ -266,14 +266,9 @@ void receivedCallback(uint32_t from, String & msg) {
 
   if (msg.startsWith("/")) {
     Serial.printf("starting playback of %s", msg.c_str());
-<<<<<<< HEAD
-    audio.connecttoFS(SD, msg.c_str()); // start playback (async)
- 
-=======
     if (sd_present){
       audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
     }
->>>>>>> cbfd295 (check for presense of SD card)
   } else if (msg.startsWith("eof_mp3")) {
     Serial.printf("Received eof_mp3 from %u", from);
     triggerEvent(msg);
