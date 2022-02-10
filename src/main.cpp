@@ -64,6 +64,7 @@ int question_number = 0;
 int breathing;
 SimpleList<uint32_t> nodes;
 char chipid[32];
+bool sd_present = false;
 
 int mode = 0;  // 0=start 1=question 2=pause 3=answer
 String modes[4] = {"start","question","pause","answer"};
@@ -100,7 +101,7 @@ void setup() {
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
   SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-  SD.begin(SD_CS);
+  sd_present = SD.begin(SD_CS);
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(17); // 0...21
 
@@ -265,8 +266,14 @@ void receivedCallback(uint32_t from, String & msg) {
 
   if (msg.startsWith("/")) {
     Serial.printf("starting playback of %s", msg.c_str());
+<<<<<<< HEAD
     audio.connecttoFS(SD, msg.c_str()); // start playback (async)
  
+=======
+    if (sd_present){
+      audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
+    }
+>>>>>>> cbfd295 (check for presense of SD card)
   } else if (msg.startsWith("eof_mp3")) {
     Serial.printf("Received eof_mp3 from %u", from);
     triggerEvent(msg);
