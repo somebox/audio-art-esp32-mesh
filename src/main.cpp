@@ -125,6 +125,10 @@ void setup() {
         onFlag = true;
       blinkNoNodes.delay(BLINK_DURATION);
 
+      if (random(2)==1){
+        audio.setTimeOffset(1-random(3));
+      } 
+
       if (blinkNoNodes.isLastIteration()) {
         // Finished blinking. Reset task for next run 
         // blink number of nodes (including this node) times
@@ -181,7 +185,7 @@ void triggerEvent(String msg){
   Serial.println("triggerEvent");
   if (mode == MODE_START){
     // set up start conditions
-    question_number = (question_number + 1) % 26;  //  increment, limit to 0-25
+    question_number = question_number % 26 + 1;  //  increment, limit to 0-25
     Serial.println(String("Start, question ")+question_number);
     // TODO initiate pause
     mode = MODE_QUESTION;
@@ -267,10 +271,7 @@ void receivedCallback(uint32_t from, String & msg) {
     Serial.printf("Received eof_mp3 from %u", from);
     triggerEvent(msg);
   }
-
-  if (random(2)==1){
-    audio.setAudioPlayPosition(random(audio.getAudioCurrentTime()+1000-random(2000)));
-  }  
+ 
   if (random(4)==1){
     audio.audioFileSeek(random(120)/100.0+0.25);
   }
