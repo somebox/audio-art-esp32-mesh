@@ -17,8 +17,8 @@
 #include "FS.h"
 
 // PainlessMesh
-#define   BLINK_PERIOD    3000 // milliseconds until cycle repeat
-#define   BLINK_DURATION  200  // milliseconds LED is on for
+#define   BLINK_PERIOD    5000 // milliseconds until cycle repeat
+#define   BLINK_DURATION  175  // milliseconds LED is on for
 #define   MESH_SSID       "artnet"
 #define   MESH_PASSWORD   "loh6eiRoo2Ahrie"
 #define   MESH_PORT       5555
@@ -33,8 +33,14 @@
 #define I2S_LRC       26
 #define LED_STATUS     2
 #define LED_LEVEL     15
-#define BUTTON1       17
-#define BUTTON2       16
+#define BUTTON1       34
+#define BUTTON2       35
+// I2C: 21 SDA / 22 SCL
+
+// Stations
+#define STA_CONTROLLER  3171316429
+#define STA_QUESTIONS   535391373
+#define STA_ANSWERS     164488417
 
 // Prototypes
 void sendMessage(); 
@@ -43,22 +49,33 @@ void newConnectionCallback(uint32_t nodeId);
 void changedConnectionCallback(); 
 void nodeTimeAdjustedCallback(int32_t offset); 
 void delayReceivedCallback(uint32_t from, int32_t delay);
-void nextTrack();
+void triggerEvent(String msg);
+void nextQuestion();
 void status();
 
 Scheduler     userScheduler; // to control your personal task
 painlessMesh  mesh;
 Audio audio;
-EasyButton nextButton(BUTTON1); // skip track
-EasyButton statusButton(BUTTON2); // info
+EasyButton nextButton(BUTTON1, 50, true); // skip track
+EasyButton statusButton(BUTTON2, 50, true); // info
 
 bool calc_delay = false;
 int question_number = 0;
 int breathing;
 SimpleList<uint32_t> nodes;
+char chipid[32];
+
+int mode = 0;  // 0=start 1=question 2=pause 3=answer
+String modes[4] = {"start","question","pause","answer"};
+#define MODE_START 0
+#define MODE_QUESTION 1
+#define MODE_PAUSE 2
+#define MODE_ANSWER 3
+
 
 void sendMessage() ; // Prototype
 Task taskSendMessage( TASK_SECOND * 1, TASK_FOREVER, &sendMessage ); // start with a one second interval
+// Task taskPauseMessage( delay , TASK_ONCE, &sendPause);
 
 // Task to blink the number of nodes
 Task blinkNoNodes;
@@ -66,13 +83,16 @@ bool onFlag = false;
 
 void setup() {
   Serial.begin(115200);
+  uint64_t addr = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
+  // uint16_t short_addr = (uint16_t)(addr >> 32);
+  sprintf(chipid, "ART-%012llx", addr);
 
   // UI controls
   pinMode(LED_STATUS, OUTPUT);
   ledcSetup(0, 1000, 10);   // chan 0, 1kHz, 10-bit
   ledcAttachPin(LED_LEVEL, 0); // chan 0
   nextButton.begin();
-  nextButton.onPressed(nextTrack);
+  nextButton.onPressed(nextQuestion);
   statusButton.begin();
   statusButton.onPressed(status);
 
@@ -93,6 +113,7 @@ void setup() {
   mesh.onNodeTimeAdjusted(&nodeTimeAdjustedCallback);
   mesh.onNodeDelayReceived(&delayReceivedCallback);
 
+  // Task setup
   userScheduler.addTask( taskSendMessage );
   taskSendMessage.enable();
 
@@ -114,6 +135,7 @@ void setup() {
             (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
       }
   });
+  
   userScheduler.addTask(blinkNoNodes);
   blinkNoNodes.enable();
 
@@ -126,29 +148,81 @@ void loop() {
   nextButton.read();
   statusButton.read();
   digitalWrite(LED_STATUS, onFlag);
-  int breathing = abs((int)millis() % 2000 - 1000)/10;   // triangle wave, 0.5Hz, 0..100
-  ledcWrite(0, (int) max(0, (int)(mesh.stability*0.9) - breathing));
+  int breathing = abs((int)millis() % 4000 - 2000)/6;   // triangle wave, 0.25Hz, 0..330
+  int value = (int)(mesh.stability*0.7) - breathing;
+  // if (millis() % 200 == 0) Serial.println(value);
+  ledcWrite(0, max(0, min(value, 1000)));
+}
+
+String mp3_filename(){
+  char filename[40];
+  sprintf(filename, "/%02d-%s.mp3", question_number, modes[mode].c_str());
+  return(filename);
+}
+
+/*
+    controller_node:
+    - manages the timing and order of questions & answers
+    - sends requests to play mp3
+    - listens for messages saying mp3 playback is finished
+    - pauses for a random time
+    question_node / answer_node:
+    - listens for events to playback
+    - plays mp3s matching an expected pattern
+    - sends message when playback is finished
+*/
+
+void nextQuestion(){
+  triggerEvent("eof_mp3");
 }
 
 // called when button pressed
-void nextTrack(){
-  char filename[80];
-  sprintf(filename, "/%02d-answer.mp3", question_number+1); // filenames start with 1
-  Serial.printf("button: next (%s)\n", filename);
-  audio.connecttoFS(SD, filename); // start playback (async)  
-  mesh.sendBroadcast(filename);
-  question_number = (question_number + 1) % 26;  //  increment, limit to 0-25
+void triggerEvent(String msg){
+  Serial.println("triggerEvent");
+  if (mode == MODE_START){
+    // set up start conditions
+    question_number = (question_number + 1) % 26;  //  increment, limit to 0-25
+    Serial.println(String("Start, question ")+question_number);
+    // TODO initiate pause
+    mode = MODE_QUESTION;
+    // trigger playback of question mp3
+    mesh.sendBroadcast(mp3_filename());     
+    Serial.println(mp3_filename() + " requested for MODE_QUESTION");
+    // after pause, trigger first question
+  } else if (mode == MODE_QUESTION){
+    // wait for 'mp3_eof' event
+    if (msg.startsWith("eof_mp3")){
+      Serial.println("Question playback done");
+      mode = MODE_ANSWER;
+      mesh.sendBroadcast(mp3_filename());
+      Serial.println(mp3_filename() + " requested for MODE_ANSWER");
+    }
+  // TODO initiate pause
+  } else if (mode == MODE_ANSWER){
+    // wait for 'mp3_eof' event
+    if (msg.startsWith("eof_mp3")){    
+      Serial.println("Answer playback done");
+      mode = MODE_START;
+    }
+    // TODO initiate pause
+  }
+  
+  
+
 }
 
 void status(){
   Serial.println("-----------------");
-  Serial.print("station id: ");
-  Serial.println(mesh.getNodeId());
-  Serial.printf("mesh time: %zu\n", mesh.getNodeTime());
-  Serial.printf("mesh stability: %d\n", mesh.stability);
-   
+  Serial.print("mesh node id: ");
+  Serial.print(mesh.getNodeId());
+  Serial.print(" artnet id: ");
+  Serial.println(chipid);
+  Serial.printf("mesh '%s' || stability: %d || mesh time: %zu\n", 
+      MESH_SSID, 
+      mesh.stability,
+      mesh.getNodeTime());   
   nodes = mesh.getNodeList();
-  Serial.printf("Num nodes: %d\n", nodes.size());
+  Serial.printf("Num nodes: %d\n", nodes.size()+1);
   Serial.printf("mesh nodes: ");
   SimpleList<uint32_t>::iterator node = nodes.begin();
   while (node != nodes.end()) {
@@ -156,7 +230,6 @@ void status(){
     node++;
   }
   Serial.println();
-
   Serial.print("mesh sub-connections: ");
   Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
 
@@ -179,16 +252,20 @@ void sendMessage() {
   }
 
   Serial.printf("Sending message: %s\n", msg.c_str());
-  taskSendMessage.setInterval( random(TASK_SECOND * 3, TASK_SECOND * 6));  // between 1 and 5 seconds
+  taskSendMessage.setInterval( random(TASK_SECOND * 10, TASK_SECOND * 20));  // between 1 and 5 seconds
 }
 
 
 void receivedCallback(uint32_t from, String & msg) {
-  if (msg.startsWith("/")){
+  Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
+
+  if (msg.startsWith("/")) {
     Serial.printf("starting playback of %s", msg.c_str());
     audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
+  } else if (msg.startsWith("eof_mp3")) {
+    Serial.printf("Received eof_mp3 from %u", from);
+    triggerEvent(msg);
   }
-  Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
 }
 
 void newConnectionCallback(uint32_t nodeId) {
@@ -229,6 +306,7 @@ void audio_id3data(const char *info){  //id3 metadata
 }
 void audio_eof_mp3(const char *info){  //end of file
     Serial.print("eof_mp3     ");Serial.println(info);
+    mesh.sendBroadcast("eof_mp3:");
 }
 void audio_showstation(const char *info){
     Serial.print("station     ");Serial.println(info);
