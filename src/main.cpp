@@ -252,7 +252,7 @@ void sendMessage() {
   }
 
   Serial.printf("Sending message: %s\n", msg.c_str());
-  taskSendMessage.setInterval( random(TASK_SECOND * 10, TASK_SECOND * 20));  // between 1 and 5 seconds
+  taskSendMessage.setInterval( random(TASK_SECOND * 3, TASK_SECOND * 5));  // between 1 and 5 seconds
 }
 
 
