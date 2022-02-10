@@ -232,7 +232,7 @@ void status(){
   Serial.println();
   Serial.print("mesh sub-connections: ");
   Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
-
+ 
   Serial.println("-----------------");
 }
 
@@ -261,10 +261,18 @@ void receivedCallback(uint32_t from, String & msg) {
 
   if (msg.startsWith("/")) {
     Serial.printf("starting playback of %s", msg.c_str());
-    audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
+    audio.connecttoFS(SD, msg.c_str()); // start playback (async)
+ 
   } else if (msg.startsWith("eof_mp3")) {
     Serial.printf("Received eof_mp3 from %u", from);
     triggerEvent(msg);
+  }
+
+  if (random(2)==1){
+    audio.setAudioPlayPosition(random(audio.getAudioCurrentTime()+1000-random(2000)));
+  }  
+  if (random(4)==1){
+    audio.audioFileSeek(random(120)/100.0+0.25);
   }
 }
 
