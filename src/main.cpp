@@ -169,8 +169,12 @@ void loop() {
   digitalWrite(LED_STATUS, onFlag);
   int breathing = abs((int)millis() % 4000 - 2000)/6;   // triangle wave, 0.25Hz, 0..330
   int value = (int)(mesh.stability*0.7) - breathing;
-  if (millis() % 400 == 0){
-    chaos_level = analogRead(KNOB);
+  if (is_controller && (millis() % 400 == 0)){
+    int reading = analogRead(KNOB) / 1000;
+    if (chaos_level != reading){
+      chaos_level = reading;
+      mesh.sendBroadcast(String("chaos:") + chaos_level);
+    }
   } 
   ledcWrite(0, max(0, min(value, 1000)));
 }
@@ -280,6 +284,12 @@ void sendMessage() {
 void receivedCallback(uint32_t from, String & msg) {
   Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
 
+  if (msg.startsWith("chaos:")){
+    int newval = msg.substring(6).toInt();
+    Serial.print("got chaos:");
+    Serial.println(newval);
+    chaos_level = newval;
+  }
   if (msg.startsWith("/")) {
     if (has_sd_card){
       Serial.printf("starting playback of %s\n", msg.c_str());
