@@ -88,7 +88,7 @@ void setup() {
   // uint16_t short_addr = (uint16_t)(addr >> 32);
   delay(500);
   sprintf(chipid, "ART-%012llx", addr);
-  Serial.println("Started. Node %s", chipid);
+  Serial.printf("Started. Node %s\n", chipid);
 
   // UI controls
   pinMode(LED_STATUS, OUTPUT);
@@ -129,7 +129,7 @@ void setup() {
         onFlag = true;
       blinkNoNodes.delay(BLINK_DURATION);
 
-      if (random(2)==1){
+      if (random(4)==1){
         audio.setTimeOffset(1-random(3));
       } 
 
