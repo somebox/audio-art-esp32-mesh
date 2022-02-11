@@ -174,6 +174,7 @@ void loop() {
     if (chaos_level != reading){
       chaos_level = reading;
       mesh.sendBroadcast(String("chaos:") + chaos_level);
+      Serial.printf("Chaos level set to %d\n", chaos_level);
     }
   } 
   ledcWrite(0, max(0, min(value, 1000)));
