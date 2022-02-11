@@ -342,7 +342,7 @@ void board_config(){
     has_knob = true;
     is_controller = true;
   }
-  if (!strcmp(chipid, "f463e91f9c9c")){ // breadboard line out node 1373
+  if (!strcmp(chipid, "8c6ce91f9c9c")){ // breadboard line out node 1373
     short_id = 1373;
     has_audio = true;
     has_buttons = false;
@@ -368,6 +368,9 @@ void board_config(){
     has_buttons = false;
     has_knob = false;
   }
+  Serial.print("has_audio: ");
+  Serial.println(has_audio ? "true" : "false");
+
 }
 
 
