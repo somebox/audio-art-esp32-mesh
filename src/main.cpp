@@ -86,7 +86,9 @@ void setup() {
   Serial.begin(115200);
   uint64_t addr = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
   // uint16_t short_addr = (uint16_t)(addr >> 32);
+  delay(500);
   sprintf(chipid, "ART-%012llx", addr);
+  Serial.println("Started. Node %s", chipid);
 
   // UI controls
   pinMode(LED_STATUS, OUTPUT);
@@ -102,6 +104,7 @@ void setup() {
   digitalWrite(SD_CS, HIGH);
   SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
   sd_present = SD.begin(SD_CS);
+  Serial.println(sd_present ? "SD card loaded." : "* ERROR: No SD card found!");
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
   audio.setVolume(17); // 0...21
 
@@ -265,7 +268,7 @@ void receivedCallback(uint32_t from, String & msg) {
   Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
 
   if (msg.startsWith("/")) {
-    Serial.printf("starting playback of %s", msg.c_str());
+    Serial.printf("starting playback of %s\n", msg.c_str());
     if (sd_present){
       audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
     }
