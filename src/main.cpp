@@ -116,7 +116,7 @@ void setup() {
   Serial.println(has_sd_card ? "SD card loaded." : "* ERROR: No SD card found!");
   if (has_audio){
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-    audio.setVolume(17); // 0...21
+    audio.setVolume(19); // 0...21
   }
 
   // mesh setup
@@ -198,8 +198,10 @@ String mp3_filename(){
     - sends message when playback is finished
 */
 
+// called by button handler
 void nextQuestion(){
-  triggerEvent("eof_mp3");
+  mode = MODE_START;
+  triggerEvent("next");
 }
 
 // called when button pressed
@@ -209,6 +211,9 @@ void triggerEvent(String msg){
     // set up start conditions
     question_number = question_number % 26 + 1;  //  increment, limit to 0-25
     Serial.println(String("Start, question ")+question_number);
+    if (chaos_level == 4){
+      question_number = random(26);
+    }
     // TODO initiate pause
     mode = MODE_QUESTION;
     // trigger playback of question mp3
@@ -228,7 +233,9 @@ void triggerEvent(String msg){
     // wait for 'mp3_eof' event
     if (msg.startsWith("eof_mp3")){    
       Serial.println("Answer playback done");
-      mode = MODE_START;
+      if (chaos_level > 2){
+        mode = MODE_START;
+      }
     }
     // TODO initiate pause
   }
@@ -258,7 +265,9 @@ void status(){
   Serial.println();
   Serial.print("mesh sub-connections: ");
   Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
- 
+  if (chaos_level > 1){
+    mesh.sendBroadcast("glitch");
+  }
   Serial.println("-----------------");
 }
 
@@ -291,6 +300,9 @@ void receivedCallback(uint32_t from, String & msg) {
     Serial.println(newval);
     chaos_level = newval;
   }
+  if (msg.startsWith("glitch")){
+    audio.setTimeOffset(chaos_level/2-random(chaos_level));
+  }
   if (msg.startsWith("/")) {
     if (has_sd_card){
       Serial.printf("starting playback of %s\n", msg.c_str());
@@ -301,8 +313,9 @@ void receivedCallback(uint32_t from, String & msg) {
     if (is_controller) triggerEvent(msg);
   }
  
-  if (random(4)==1 && chaos_level > 1){
-    audio.audioFileSeek(random(120)/100.0+0.25);
+  if (random(7-chaos_level)==1 && chaos_level > 0){
+    int weird_factor = chaos_level * 20;
+    audio.audioFileSeek((100 - random(weird_factor) + weird_factor/2)/100.0);
   }
 }
 
