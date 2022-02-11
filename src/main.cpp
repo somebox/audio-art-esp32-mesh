@@ -16,6 +16,8 @@
 #include "SD.h"
 #include "FS.h"
 
+#define ARTNET_VERSION "0.1"
+
 // PainlessMesh
 #define   BLINK_PERIOD    5000 // milliseconds until cycle repeat
 #define   BLINK_DURATION  175  // milliseconds LED is on for
@@ -60,11 +62,13 @@ EasyButton nextButton(BUTTON1, 50, true); // skip track
 EasyButton statusButton(BUTTON2, 50, true); // info
 
 bool calc_delay = false;
-int question_number = 0;
-int breathing;
 SimpleList<uint32_t> nodes;
+
+int question_number = 0;
 char chipid[32];
-bool sd_present = false;
+int short_id;
+int chaos_level = 0;  // glitch meter
+bool is_controller, has_buttons, has_audio, has_knob, has_sd_card = false;
 
 int mode = 0;  // 0=start 1=question 2=pause 3=answer
 String modes[4] = {"start","question","pause","answer"};
@@ -87,8 +91,9 @@ void setup() {
   uint64_t addr = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
   // uint16_t short_addr = (uint16_t)(addr >> 32);
   delay(500);
-  sprintf(chipid, "ART-%012llx", addr);
-  Serial.printf("Started. Node %s\n", chipid);
+  sprintf(chipid, "%012llx", addr);
+  Serial.printf("ArtNet v%s started. Node %s\n", ARTNET_VERSION, chipid);
+  board_config();
 
   // UI controls
   pinMode(LED_STATUS, OUTPUT);
@@ -103,10 +108,12 @@ void setup() {
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
   SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-  sd_present = SD.begin(SD_CS);
-  Serial.println(sd_present ? "SD card loaded." : "* ERROR: No SD card found!");
-  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-  audio.setVolume(17); // 0...21
+  has_sd_card = SD.begin(SD_CS);
+  Serial.println(has_sd_card ? "SD card loaded." : "* ERROR: No SD card found!");
+  if (has_audio){
+    audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+    audio.setVolume(17); // 0...21
+  }
 
   // mesh setup
   mesh.setDebugMsgTypes(ERROR | DEBUG);  // set before init() so that you can see error messages
@@ -129,7 +136,7 @@ void setup() {
         onFlag = true;
       blinkNoNodes.delay(BLINK_DURATION);
 
-      if (random(4)==1){
+      if (random(4)==1 and chaos_level > 2){
         audio.setTimeOffset(1-random(3));
       } 
 
@@ -268,16 +275,16 @@ void receivedCallback(uint32_t from, String & msg) {
   Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
 
   if (msg.startsWith("/")) {
-    Serial.printf("starting playback of %s\n", msg.c_str());
-    if (sd_present){
+    if (has_sd_card){
+      Serial.printf("starting playback of %s\n", msg.c_str());
       audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
     }
   } else if (msg.startsWith("eof_mp3")) {
     Serial.printf("Received eof_mp3 from %u", from);
-    triggerEvent(msg);
+    if (is_controller) triggerEvent(msg);
   }
  
-  if (random(4)==1){
+  if (random(4)==1 && chaos_level > 1){
     audio.audioFileSeek(random(120)/100.0+0.25);
   }
 }
@@ -309,6 +316,44 @@ void nodeTimeAdjustedCallback(int32_t offset) {
 void delayReceivedCallback(uint32_t from, int32_t delay) {
   Serial.printf("Delay to node %u is %d us\n", from, delay);
 }
+
+// board config
+void board_config(){ 
+  if (chipid == "cc7206bd9e7c"){ // controller node 
+    short_id = 6429;
+    has_audio = false;
+    has_buttons = true;
+    has_knob = true;
+    is_controller = true;
+  }
+  if (chipid == "f463e91f9c9c"){ // breadboard line out node 1373
+    short_id = 1373;
+    has_audio = true;
+    has_buttons = false;
+    has_knob = false;
+  }
+  if (chipid == "e0e4cd09f0b8"){ // line out node 8417
+    short_id = 8417;
+    has_audio = true;
+    has_buttons = false;
+    has_knob = false;
+  }
+  // default question node
+  if (chipid == "3c7506bd9e7c"){ // audio amp node 7053
+    short_id = 7053;
+    has_audio = true;
+    has_buttons = false;
+    has_knob = false;
+  }  
+  // default answer node
+  if (chipid == "f463e91f9c9c"){ // audio amp 9173 
+    short_id = 9173;
+    has_audio = true;
+    has_buttons = false;
+    has_knob = false;
+  }
+}
+
 
 // i2s audio callbacks
 
