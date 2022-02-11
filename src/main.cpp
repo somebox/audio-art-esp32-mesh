@@ -265,7 +265,7 @@ void status(){
   Serial.println();
   Serial.print("mesh sub-connections: ");
   Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
-  if (chaos_level > 1){
+  if (chaos_level > 0){
     mesh.sendBroadcast("glitch");
   }
   Serial.println("-----------------");
