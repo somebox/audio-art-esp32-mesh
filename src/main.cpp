@@ -37,6 +37,7 @@
 #define LED_LEVEL     15
 #define BUTTON1       34
 #define BUTTON2       35
+#define KNOB          32
 // I2C: 21 SDA / 22 SCL
 
 // Stations
@@ -54,6 +55,7 @@ void delayReceivedCallback(uint32_t from, int32_t delay);
 void triggerEvent(String msg);
 void nextQuestion();
 void status();
+void board_config();
 
 Scheduler     userScheduler; // to control your personal task
 painlessMesh  mesh;
@@ -86,6 +88,7 @@ Task taskSendMessage( TASK_SECOND * 1, TASK_FOREVER, &sendMessage ); // start wi
 Task blinkNoNodes;
 bool onFlag = false;
 
+// --------------------
 void setup() {
   Serial.begin(115200);
   uint64_t addr = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
@@ -103,6 +106,7 @@ void setup() {
   nextButton.onPressed(nextQuestion);
   statusButton.begin();
   statusButton.onPressed(status);
+  pinMode(KNOB, INPUT);
 
   // audio setup
   pinMode(SD_CS, OUTPUT);
@@ -165,7 +169,9 @@ void loop() {
   digitalWrite(LED_STATUS, onFlag);
   int breathing = abs((int)millis() % 4000 - 2000)/6;   // triangle wave, 0.25Hz, 0..330
   int value = (int)(mesh.stability*0.7) - breathing;
-  // if (millis() % 200 == 0) Serial.println(value);
+  if (millis() % 400 == 0){
+    chaos_level = analogRead(KNOB);
+  } 
   ledcWrite(0, max(0, min(value, 1000)));
 }
 
@@ -319,34 +325,34 @@ void delayReceivedCallback(uint32_t from, int32_t delay) {
 
 // board config
 void board_config(){ 
-  if (chipid == "cc7206bd9e7c"){ // controller node 
+  if (!strcmp(chipid, "cc7206bd9e7c")){ // controller node 
     short_id = 6429;
     has_audio = false;
     has_buttons = true;
     has_knob = true;
     is_controller = true;
   }
-  if (chipid == "f463e91f9c9c"){ // breadboard line out node 1373
+  if (!strcmp(chipid, "f463e91f9c9c")){ // breadboard line out node 1373
     short_id = 1373;
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }
-  if (chipid == "e0e4cd09f0b8"){ // line out node 8417
+  if (!strcmp(chipid, "e0e4cd09f0b8")){ // line out node 8417
     short_id = 8417;
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }
   // default question node
-  if (chipid == "3c7506bd9e7c"){ // audio amp node 7053
+  if (!strcmp(chipid, "3c7506bd9e7c")){ // audio amp node 7053
     short_id = 7053;
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }  
   // default answer node
-  if (chipid == "f463e91f9c9c"){ // audio amp 9173 
+  if (!strcmp(chipid, "f463e91f9c9c")){ // audio amp 9173 
     short_id = 9173;
     has_audio = true;
     has_buttons = false;
