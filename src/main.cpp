@@ -377,7 +377,7 @@ void board_config(){
     has_knob = false;
   }  
   // default answer node
-  if (!strcmp(chipid, "f463e91f9c9c")){ // audio amp 9173 
+  if (!strcmp(chipid, "f463e91f9c9c")){ // audio amp node 9173 
     short_id = 9173;
     has_audio = true;
     has_buttons = false;
