@@ -18,9 +18,10 @@
 
 #define ARTNET_VERSION "0.1"
 
-// PainlessMesh
+// settings
 #define   BLINK_PERIOD    5000 // milliseconds until cycle repeat
 #define   BLINK_DURATION  175  // milliseconds LED is on for
+#define   DEBOUNCE_TIME   50   // used for pushbuttons
 #define   MESH_SSID       "artnet"
 #define   MESH_PASSWORD   "loh6eiRoo2Ahrie"
 #define   MESH_PORT       5555
@@ -39,6 +40,8 @@
 #define BUTTON2       35
 #define KNOB          32
 // I2C: 21 SDA / 22 SCL
+// RX1/TX1: 16 /17 - not available on WROVER! (due to PSRAM?)
+// RX2/TX2: 4 / 22 - https://github.com/espressif/esp-idf/issues/6939
 
 // Stations
 #define STA_CONTROLLER  3171316429
@@ -60,18 +63,16 @@ void board_config();
 Scheduler     userScheduler; // to control your personal task
 painlessMesh  mesh;
 Audio audio;
-EasyButton nextButton(BUTTON1, 50, true); // skip track
-EasyButton statusButton(BUTTON2, 50, true); // info
+EasyButton nextButton(BUTTON1, DEBOUNCE_TIME, true); // skip track
+EasyButton statusButton(BUTTON2, DEBOUNCE_TIME, true); // info
 
-bool calc_delay = false;
 SimpleList<uint32_t> nodes;
-
-int question_number = 0;
+bool calc_delay = false;
+bool is_controller, has_buttons, has_audio, has_knob, has_sd_card = false;
 char chipid[32];
 int short_id;
 int chaos_level = 0;  // glitch meter
-bool is_controller, has_buttons, has_audio, has_knob, has_sd_card = false;
-
+int question_number = 0;
 int mode = 0;  // 0=start 1=question 2=pause 3=answer
 String modes[4] = {"start","question","pause","answer"};
 #define MODE_START 0
