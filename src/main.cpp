@@ -15,8 +15,7 @@
 #include "Audio.h"
 #include "SD.h"
 #include "FS.h"
-
-#define ARTNET_VERSION "0.1"
+#include <TaskScheduler.h>
 
 // settings
 #define   BLINK_PERIOD    5000 // milliseconds until cycle repeat
@@ -59,12 +58,20 @@ void triggerEvent(String msg);
 void nextQuestion();
 void status();
 void board_config();
+void sendMessage() ; // Prototype
 
-Scheduler     userScheduler; // to control your personal task
+// Mesh network
 painlessMesh  mesh;
 Audio audio;
 EasyButton nextButton(BUTTON1, DEBOUNCE_TIME, true); // skip track
 EasyButton statusButton(BUTTON2, DEBOUNCE_TIME, true); // info
+
+// TaskScheduler stuff
+Scheduler     userScheduler; // to control your personal task
+Task taskSendMessage( TASK_SECOND * 1, TASK_FOREVER, &sendMessage ); // start with a one second interval
+Task blinkNoNodes; // blink the number of nodes
+Task taskPauseMessage;  // delay between questions
+bool onFlag = false;
 
 SimpleList<uint32_t> nodes;
 bool calc_delay = false;
@@ -79,25 +86,20 @@ String modes[4] = {"start","question","pause","answer"};
 #define MODE_QUESTION 1
 #define MODE_PAUSE 2
 #define MODE_ANSWER 3
+#define MODE_WAITING 4
 
 
-void sendMessage() ; // Prototype
-Task taskSendMessage( TASK_SECOND * 1, TASK_FOREVER, &sendMessage ); // start with a one second interval
-// Task taskPauseMessage( delay , TASK_ONCE, &sendPause);
 
-// Task to blink the number of nodes
-Task blinkNoNodes;
-bool onFlag = false;
 
 // --------------------
 void setup() {
   Serial.begin(115200);
   uint64_t addr = ESP.getEfuseMac(); // The chip ID is essentially its MAC address(length: 6 bytes).
   // uint16_t short_addr = (uint16_t)(addr >> 32);
-  delay(500);
-  sprintf(chipid, "%012llx", addr);
-  Serial.printf("ArtNet v%s started. Node %s\n", ARTNET_VERSION, chipid);
+  delay(2000);
+  sprintf(chipid, "%012llx", addr);  // identify board by ESP32 chip identifier
   board_config();
+  Serial.printf("ArtNet v%s started. %s node %s\n", VERSION, is_controller ? "controller" : "playback", chipid);
 
   // UI controls
   pinMode(LED_STATUS, OUTPUT);
@@ -117,7 +119,7 @@ void setup() {
   Serial.println(has_sd_card ? "SD card loaded." : "* ERROR: No SD card found!");
   if (has_audio){
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
-    audio.setVolume(19); // 0...21
+    audio.setVolume(20); // 0...21
   }
 
   // mesh setup
@@ -132,7 +134,7 @@ void setup() {
   // Task setup
   userScheduler.addTask( taskSendMessage );
   taskSendMessage.enable();
-
+  
   blinkNoNodes.set(BLINK_PERIOD, (mesh.getNodeList().size() + 1) * 2, []() {
       // If on, switch off, else switch on
       if (onFlag)
@@ -141,7 +143,7 @@ void setup() {
         onFlag = true;
       blinkNoNodes.delay(BLINK_DURATION);
 
-      if (random(4)==1 and chaos_level > 2){
+      if ((chaos_level > 4) and (random(4)==1)){
         audio.setTimeOffset(1-random(3));
       } 
 
@@ -155,9 +157,11 @@ void setup() {
             (mesh.getNodeTime() % (BLINK_PERIOD*1000))/1000);
       }
   });
-  
+
   userScheduler.addTask(blinkNoNodes);
   blinkNoNodes.enable();
+  userScheduler.addTask( taskPauseMessage );  
+
 
   randomSeed(analogRead(A0));
 }
@@ -171,7 +175,7 @@ void loop() {
   int breathing = abs((int)millis() % 4000 - 2000)/6;   // triangle wave, 0.25Hz, 0..330
   int value = (int)(mesh.stability*0.7) - breathing;
   if (is_controller && (millis() % 400 == 0)){
-    int reading = analogRead(KNOB) / 1000;
+    int reading = map(analogRead(KNOB), 0, 4096, 0, 5);
     if (chaos_level != reading){
       chaos_level = reading;
       mesh.sendBroadcast(String("chaos:") + chaos_level);
@@ -205,14 +209,24 @@ void nextQuestion(){
   triggerEvent("next");
 }
 
+int calcPause(int factor){
+  if (chaos_level == 1){
+    return factor + random(2);
+  } else if (chaos_level > 1){
+    return random(10-chaos_level);
+  } else {
+    return(1);
+  }
+}
+
 // called when button pressed
 void triggerEvent(String msg){
   Serial.println("triggerEvent");
   if (mode == MODE_START){
     // set up start conditions
     question_number = question_number % 26 + 1;  //  increment, limit to 0-25
-    Serial.println(String("Start, question ")+question_number);
-    if (chaos_level == 4){
+    Serial.println(String("start: question ")+question_number);
+    if (chaos_level > 3){
       question_number = random(26);
     }
     // TODO initiate pause
@@ -225,20 +239,37 @@ void triggerEvent(String msg){
     // wait for 'mp3_eof' event
     if (msg.startsWith("eof_mp3")){
       Serial.println("Question playback done");
-      mode = MODE_ANSWER;
-      mesh.sendBroadcast(mp3_filename());
-      Serial.println(mp3_filename() + " requested for MODE_ANSWER");
+      mode = MODE_PAUSE;
+      int pause_seconds = calcPause(2);
+      Serial.printf("pausing %d seconds before answer\n", pause_seconds);
+      taskPauseMessage.set(TASK_SECOND * 1, TASK_ONCE, []() {
+          Serial.println("pause task finished");
+          mode = MODE_ANSWER;
+          mesh.sendBroadcast(mp3_filename());   
+          Serial.println(mp3_filename() + " requested for MODE_ANSWER"); 
+        });
+        taskPauseMessage.enableDelayed(TASK_SECOND * pause_seconds);
     }
-  // TODO initiate pause
+  } else if (mode == MODE_PAUSE){
+    Serial.println(" * ignoring: still pausing for answer");
   } else if (mode == MODE_ANSWER){
     // wait for 'mp3_eof' event
     if (msg.startsWith("eof_mp3")){    
       Serial.println("Answer playback done");
-      if (chaos_level > 2){
-        mode = MODE_START;
+      mode = MODE_WAITING;
+      if (chaos_level > 0 and chaos_level < 4){
+        int pause_seconds = calcPause(20);        
+        Serial.printf("delaying %d seconds\n", pause_seconds);
+        taskPauseMessage.set(TASK_SECOND * 1, TASK_ONCE, []() {
+          Serial.println("delay task finished");
+          nextQuestion();
+        });      
+        taskPauseMessage.enableDelayed(TASK_SECOND * pause_seconds);
       }
     }
-    // TODO initiate pause
+  // pause
+  } else if (mode == MODE_WAITING){
+    Serial.println(" * ignoring: im waiting for the pause to finish!");
   }
   
   
@@ -266,7 +297,7 @@ void status(){
   Serial.println();
   Serial.print("mesh sub-connections: ");
   Serial.printf("  JSON: %s\n", mesh.subConnectionJson().c_str());
-  if (chaos_level > 0){
+  if (chaos_level > 1){
     mesh.sendBroadcast("glitch");
   }
   Serial.println("-----------------");
@@ -291,6 +322,20 @@ void sendMessage() {
   taskSendMessage.setInterval( random(TASK_SECOND * 3, TASK_SECOND * 5));  // between 1 and 5 seconds
 }
 
+bool should_play_audio(String msg){
+  if (msg.indexOf("question") >= 0) {
+    if (short_id == 7053 && chaos_level > 1) return true;
+    if (short_id == 1373) return true;
+    return false;
+  } else if (msg.indexOf("answer") >= 0){
+    if (short_id == 8417 && chaos_level > 1) return true;
+    if (short_id == 9173) return true;
+    return false;
+  } else if (chaos_level > 3){
+    return (random(6-chaos_level)==0);
+  }
+  return false;
+}
 
 void receivedCallback(uint32_t from, String & msg) {
   Serial.printf("<-- Message from %u msg=%s\n", from, msg.c_str());
@@ -305,18 +350,18 @@ void receivedCallback(uint32_t from, String & msg) {
     audio.setTimeOffset(chaos_level/2-random(chaos_level));
   }
   if (msg.startsWith("/")) {
-    if (has_sd_card){
+    if (has_sd_card && should_play_audio(msg)){
       Serial.printf("starting playback of %s\n", msg.c_str());
       audio.connecttoFS(SD, msg.c_str()); // start playback (async)  
     }
   } else if (msg.startsWith("eof_mp3")) {
-    Serial.printf("Received eof_mp3 from %u", from);
+    Serial.printf("Received eof_mp3 from %u\n", from);
     if (is_controller) triggerEvent(msg);
   }
  
-  if (random(7-chaos_level)==1 && chaos_level > 0){
-    int weird_factor = chaos_level * 20;
-    audio.audioFileSeek((100 - random(weird_factor) + weird_factor/2)/100.0);
+  if (is_controller && (chaos_level > 2) && (random(7-chaos_level)==1)){
+    int weird_factor = (chaos_level-2) * 20;
+    audio.audioFileSeek(100 - random(weird_factor)/100.0);
   }
 }
 
@@ -350,7 +395,7 @@ void delayReceivedCallback(uint32_t from, int32_t delay) {
 
 // board config
 void board_config(){ 
-  if (!strcmp(chipid, "cc7206bd9e7c")){ // controller node 
+  if (!strcmp(chipid, "cc7206bd9e7c")){ // controller node 6429
     short_id = 6429;
     has_audio = false;
     has_buttons = true;
@@ -358,27 +403,27 @@ void board_config(){
     is_controller = true;
   }
   if (!strcmp(chipid, "8c6ce91f9c9c")){ // breadboard line out node 1373
-    short_id = 1373;
+    short_id = 1373;  // questions
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }
   if (!strcmp(chipid, "e0e4cd09f0b8")){ // line out node 8417
-    short_id = 8417;
+    short_id = 8417;  // answers
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }
   // default question node
   if (!strcmp(chipid, "3c7506bd9e7c")){ // audio amp node 7053
-    short_id = 7053;
+    short_id = 7053;  // questions
     has_audio = true;
     has_buttons = false;
     has_knob = false;
   }  
   // default answer node
   if (!strcmp(chipid, "f463e91f9c9c")){ // audio amp node 9173 
-    short_id = 9173;
+    short_id = 9173; // answers
     has_audio = true;
     has_buttons = false;
     has_knob = false;
