@@ -324,11 +324,11 @@ void sendMessage() {
 
 bool should_play_audio(String msg){
   if (msg.indexOf("question") >= 0) {
-    if (short_id == 7053 && chaos_level > 1) return true;
-    if (short_id == 1373) return true;
+    if ((short_id == 1373) && (chaos_level > 1)) return true;
+    if (short_id == 7053) return true;
     return false;
   } else if (msg.indexOf("answer") >= 0){
-    if (short_id == 8417 && chaos_level > 1) return true;
+    if ((short_id == 8417) && (chaos_level > 1)) return true;
     if (short_id == 9173) return true;
     return false;
   } else if (chaos_level > 3){
