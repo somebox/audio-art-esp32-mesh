@@ -210,12 +210,16 @@ void nextQuestion(){
 }
 
 int calcPause(int factor){
-  if (chaos_level == 1){
+  if (chaos_level == 0){
     return factor + random(2);
-  } else if (chaos_level > 1){
+  } else if (chaos_level == 1){
+    return factor + random(2);
+  } else if (chaos_level == 2){
+    return random(factor) + 2;    
+  } else if (chaos_level >= 3){
     return random(10-chaos_level);
   } else {
-    return(1);
+    return(0);
   }
 }
 
@@ -240,7 +244,7 @@ void triggerEvent(String msg){
     if (msg.startsWith("eof_mp3")){
       Serial.println("Question playback done");
       mode = MODE_PAUSE;
-      int pause_seconds = calcPause(2);
+      int pause_seconds = calcPause(3);
       Serial.printf("pausing %d seconds before answer\n", pause_seconds);
       taskPauseMessage.set(TASK_SECOND * 1, TASK_ONCE, []() {
           Serial.println("pause task finished");
