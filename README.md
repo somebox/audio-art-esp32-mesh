@@ -2,6 +2,8 @@
 
 > ESP32 devices connected via a mesh network, which are synchronized for an audio performance. The subject is a conversation about art between a real artist, Edward Wright, and the GPT-3 AI model from OpenAI. This exhibition was held in Luzern, Switzerland in February 2022.
 
+![overview](https://github.com/user-attachments/assets/ed0aa335-646f-4f82-90ed-5623edccc0ba)
+
 ## Overview
 
 A number of ESP32 nodes are placed in the same room, connected via a wireless mesh network. Each node has a different role in the performance, and coordiate to play specific audio samples, send signals to a synth module, or turn lights off and on. Some of the events are sequenced and orchestrated, others are random.
