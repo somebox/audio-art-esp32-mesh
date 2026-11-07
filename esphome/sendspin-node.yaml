@@ -1,16 +1,17 @@
-# Sendspin audio node: ESP32-WROVER devkit + PCM5102 DAC on the ESP32 HA Proto
+# Sendspin audio node: ESP32-WROVER devkit + I2S DAC on the ESP32 HA Proto
 #
 # A 38-pin ESP32-WROVER devkit on the ESP32 HA Proto carrier (v3, see
-# ~/src/esp32-ha-protoboard), with a PCM5102 I2S DAC module wired to it. The
-# ESP32 must be a WROVER module (with PSRAM); see README.md for why, and for
-# the pin choices and the carrier's jumpers. It is a Sendspin player for
-# Music Assistant. AirPlay comes from Music
-# Assistant's AirPlay Receiver plugin, which advertises this player as an
-# AirPlay target; nothing AirPlay-specific runs on the ESP32.
+# ~/src/esp32-ha-protoboard), with an I2S DAC module wired to it (a PCM5102
+# or a CJMCU-1334; README.md has the wiring for each). The ESP32 must be a
+# WROVER module (with PSRAM); see README.md for why, and for the pin choices
+# and the carrier's jumpers. It is a Sendspin player for Music Assistant.
+# AirPlay comes from Music Assistant's AirPlay Receiver plugin, which
+# advertises this player as an AirPlay target; nothing AirPlay-specific runs
+# on the ESP32.
 #
 # No secrets in this file:
 #   - Wi-Fi over USB with Improv Serial (web.esphome.io, "Connect to Wi-Fi"),
-#     or join the "Sendspin Node" hotspot and use the captive portal.
+#     or join the "sendspin-node-XXXXXX" hotspot and use the captive portal.
 #   - Home Assistant sets the API encryption key when it adopts the device.
 #
 # Build and flash:
@@ -21,8 +22,9 @@ substitutions:
   name: sendspin-node
   friendly_name: Sendspin Node
 
-  # PCM5102: BCK, LRCK, DIN. SCK to GND (the DAC makes its own clock from BCK).
-  # Same pins as the 2022 audio art boards, adjacent on the devkit header.
+  # Bit clock, word select, data: BCK/LRCK/DIN on a PCM5102, BCLK/WSEL/DIN on
+  # a CJMCU-1334. Neither needs a master clock. Same pins as the 2022 audio
+  # art boards, adjacent on the devkit header.
   i2s_bclk_pin: GPIO27
   i2s_lrclk_pin: GPIO26
   i2s_dout_pin: GPIO25

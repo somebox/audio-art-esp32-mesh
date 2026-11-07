@@ -2,10 +2,23 @@
 
 [`sendspin-node.yaml`](sendspin-node.yaml) is a [Sendspin](https://esphome.io/components/sendspin/) player for
 Music Assistant: a 38-pin ESP32-WROVER devkit on the ESP32 HA Proto carrier (v3, `~/src/esp32-ha-protoboard`),
-with a PCM5102 I2S DAC module wired to it. The I2S pins are the ones the 2022 audio art boards used
+with an I2S DAC module wired to it. The I2S pins are the ones the 2022 audio art boards used
 ([`../src/main.cpp`](../src/main.cpp)), three adjacent pins on the devkit's header.
 
+Two nodes are built, with the same firmware:
+
+| Node                   | ESP32                                                           | DAC                   |
+| ---------------------- | --------------------------------------------------------------- | --------------------- |
+| `sendspin-node-dfce28` | WROVER devkit, ESP32-D0WD rev 1.0, 8 MB PSRAM                   | PCM5102               |
+| `sendspin-node-206ad8` | WROVER-IE devkit, ESP32-D0WD-V3 rev 3.0, 8 MB flash, 8 MB PSRAM | CJMCU-1334 (UDA1334A) |
+
 ## Wiring
+
+Both DACs take the same five wires from the carrier: 5V, GND, and GPIO27 (bit clock), GPIO26 (word select) and
+GPIO25 (data). Their pins are in a different order and their control pins work differently, so wire each by its
+own table.
+
+### PCM5102
 
 | PCM5102 pin   | To                     | Why                                                               |
 | ------------- | ---------------------- | ----------------------------------------------------------------- |
@@ -22,11 +35,36 @@ with a PCM5102 I2S DAC module wired to it. The I2S pins are the ones the 2022 au
 
 The H1L–H4L solder jumpers are on the back of the module; on many of these modules they come open.
 
+### CJMCU-1334 (UDA1334A)
+
+A clone of Adafruit's UDA1334A breakout, with a 3.5 mm line-out jack.
+
+| CJMCU-1334 pin                      | To      | Why                                                          |
+| ----------------------------------- | ------- | ------------------------------------------------------------ |
+| VIN                                 | 5V      | the module's regulator makes 3.3 V                           |
+| GND                                 | GND     |                                                              |
+| BCLK                                | GPIO27  | bit clock                                                    |
+| WSEL                                | GPIO26  | word select                                                  |
+| DIN                                 | GPIO25  | data                                                         |
+| 3VO                                 | nothing | the regulator's 3.3 V output                                 |
+| SCLK, PLL, SF0, SF1, DEEM, **MUTE** | **GND** | audio mode, I2S format, no de-emphasis, not muted            |
+
+On the long row the labels alternate above and below the pins. From the VIN end the order is VIN, 3VO, GND,
+WSEL, DIN, BCLK, Lout, AGND, Rout. The short row, from the jack end, is DEEM, PLL, SF0, MUTE, SF1, SCLK.
+
+What went wrong on the first build (2026-11-07):
+
+- **SCLK is not the bit clock.** It is the system-clock input for the chip's video mode. The bit clock goes to
+  BCLK on the long row. With word select on SCLK and WSEL left open, the DAC was silent.
+- **MUTE high mutes**, the opposite of the PCM5102's XSMT.
+- **Ground all six control pins.** Adafruit's board pulls them low with resistors. On this clone, with them left
+  open, the DAC played white noise; with all six on GND it played cleanly.
+
 ## Carrier pins
 
 | Function              | GPIO           | On the HA Proto                     | In this firmware                     |
 | --------------------- | -------------- | ----------------------------------- | ------------------------------------ |
-| I2S to PCM5102        | 27, 26, 25     | devkit header / test pads           | speaker, 48 kHz 16-bit stereo        |
+| I2S to the DAC        | 27, 26, 25     | devkit header / test pads           | speaker, 48 kHz 16-bit stereo        |
 | PWM D                 | 33             | J8 bridged, MOSFET to HVCC          | `Red LED` light, lit while playing   |
 | Button                | 0              | SW1 (also the devkit's BOOT)        | play/pause                           |
 | PWM C / WS2812 out    | 5              | J7 / J11 (both bridged now)         | free                                 |
@@ -57,8 +95,8 @@ esphome run sendspin-node.yaml --device /dev/cu.usbserial-XXXX
 The first flash has to go over USB; after that, `--device sendspin-node-XXXXXX.local` (or its IP address, if the
 Mac doesn't resolve the name) flashes it over Wi-Fi.
 There are no secrets in the config. Give it Wi-Fi with Improv Serial at
-[web.esphome.io](https://web.esphome.io) ("Connect to Wi-Fi"), or join its `Sendspin Node` hotspot and use the
-captive portal. Home Assistant then finds it and sets its API key when you adopt it.
+[web.esphome.io](https://web.esphome.io) ("Connect to Wi-Fi"), or join its `sendspin-node-XXXXXX` hotspot (no
+password; the suffix is the end of its MAC address) and use the captive portal. Home Assistant then finds it and sets its API key when you adopt it.
 
 ## Music Assistant
 
@@ -91,7 +129,7 @@ covers code compiled with it. With the stacks in PSRAM, the board crashed three 
 (a null ring-buffer handle in the HTTP server task, then a null event group in the sync task), and Sendspin
 dropped the connection about every 12 seconds on a failed decryption ("Noise AEAD failure in transport mode"),
 17 times in all. With the stacks in internal RAM there were none (2026-11-07). The WROOM, without PSRAM, never
-failed a decryption. A revision 3 ESP32 (ESP32-D0WD-V3, on WROVER-E modules) doesn't have the bug.
+failed a decryption. A revision 3 ESP32 (ESP32-D0WD-V3, on WROVER-E modules, like the second node's) doesn't have the bug.
 
 Below is what happened on a WROOM first.
 
