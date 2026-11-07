@@ -1,0 +1,250 @@
+# Sendspin audio node: ESP32-WROVER devkit + PCM5102 DAC on the ESP32 HA Proto
+#
+# A 38-pin ESP32-WROVER devkit on the ESP32 HA Proto carrier (v3, see
+# ~/src/esp32-ha-protoboard), with a PCM5102 I2S DAC module wired to it. The
+# ESP32 must be a WROVER module (with PSRAM); see README.md for why, and for
+# the pin choices and the carrier's jumpers. It is a Sendspin player for
+# Music Assistant. AirPlay comes from Music
+# Assistant's AirPlay Receiver plugin, which advertises this player as an
+# AirPlay target; nothing AirPlay-specific runs on the ESP32.
+#
+# No secrets in this file:
+#   - Wi-Fi over USB with Improv Serial (web.esphome.io, "Connect to Wi-Fi"),
+#     or join the "Sendspin Node" hotspot and use the captive portal.
+#   - Home Assistant sets the API encryption key when it adopts the device.
+#
+# Build and flash:
+#   esphome run sendspin-node.yaml --device /dev/cu.usbserial-XXXX   # first time, over USB
+#   esphome run sendspin-node.yaml --device sendspin-node-XXXXXX.local  # after that, OTA
+
+substitutions:
+  name: sendspin-node
+  friendly_name: Sendspin Node
+
+  # PCM5102: BCK, LRCK, DIN. SCK to GND (the DAC makes its own clock from BCK).
+  # Same pins as the 2022 audio art boards, adjacent on the devkit header.
+  i2s_bclk_pin: GPIO27
+  i2s_lrclk_pin: GPIO26
+  i2s_dout_pin: GPIO25
+  # HA Proto PWM D (MOSFET to HVCC, jumper J8)
+  red_led_pin: GPIO33
+  # HA Proto SW1 (the devkit's BOOT line)
+  button_pin: GPIO0
+  # Carrier pins left free: I2C SDA 21 / SCL 22; SPI CLK 18, MOSI 23,
+  # MISO 19, CS 5; WS2812 out and PWM C on GPIO5 (J11, J7). PWM A and B sit
+  # on GPIO16/17, the WROVER's PSRAM lines, so they can't be used here.
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: true
+  project:
+    name: somebox.sendspin-node
+    version: "0.2.0"
+  on_boot:
+    priority: -100
+    then:
+      # Lamp test on PWM D
+      - light.turn_on:
+          id: red_led
+          brightness: 100%
+      - delay: 300ms
+      - light.turn_off: red_led
+
+esp32:
+  board: esp32dev
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+
+# Sendspin's 1 MB stream buffer, the Opus decoder's scratch area and the
+# Wi-Fi/TCP streaming buffers all live in PSRAM. A WROOM module
+# (no PSRAM) plays out of sync and runs out of RAM, so with
+# ignore_not_found: false the firmware stops at boot instead. This also tells
+# ESPHome the PSRAM is guaranteed, which turns on its full streaming network
+# settings.
+psram:
+  ignore_not_found: false
+
+logger:
+
+api:
+  id: api_server
+  # No key: Home Assistant sets one at adoption.
+  encryption:
+
+ota:
+  - platform: esphome
+    id: ota_esphome
+
+wifi:
+  id: wifi_component
+  ap: {}
+  # Keeps the stream steady; the board is mains powered.
+  power_save_mode: none
+
+captive_portal:
+
+improv_serial:
+
+binary_sensor:
+  - platform: gpio
+    id: button
+    name: Button
+    pin:
+      number: ${button_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+      ignore_strapping_warning: true # BOOT button, pulls low only when pressed
+    on_click:
+      - media_player.toggle: media_out
+
+# --- Audio ------------------------------------------------------------------
+
+i2s_audio:
+  - id: i2s_output
+    i2s_bclk_pin: ${i2s_bclk_pin}
+    i2s_lrclk_pin: ${i2s_lrclk_pin}
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_speaker
+    i2s_audio_id: i2s_output
+    i2s_dout_pin: ${i2s_dout_pin}
+    dac_type: external
+    sample_rate: 48000
+    bits_per_sample: 16bit
+    channel: stereo
+    buffer_duration: 100ms
+    # Keep the I2S clock running between tracks: no pop at the start of each
+    # track, and Sendspin's timing stays locked.
+    timeout: never
+
+sendspin:
+  id: sendspin_hub
+  # Task stacks stay in internal RAM. This ESP32 is a revision 1 chip, whose
+  # PSRAM cache bug can drop a write; with the stacks in PSRAM the board
+  # crashed on null handles and failed Noise decryption every few seconds.
+  task_stack_in_psram: false
+  model: Audio art board
+  firmware_version: "0.2.0"
+
+media_source:
+  - platform: sendspin
+    id: sendspin_source
+    # Decoding runs from internal RAM (the classic ESP32's PSRAM is slow);
+    # the 1 MB stream buffer stays in PSRAM.
+    decode_memory: internal
+
+media_player:
+  - platform: speaker_source
+    id: media_out
+    name: None
+    volume_initial: 40%
+    media_pipeline:
+      speaker: i2s_speaker
+      sources:
+        - sendspin_source
+      num_channels: 2
+    on_play:
+      - if:
+          condition:
+            switch.is_on: led_shows_playback
+          then:
+            - light.turn_on:
+                id: red_led
+                brightness: 50%
+    on_pause:
+      - if:
+          condition:
+            switch.is_on: led_shows_playback
+          then:
+            - light.turn_off: red_led
+    on_idle:
+      - if:
+          condition:
+            switch.is_on: led_shows_playback
+          then:
+            - light.turn_off: red_led
+
+text_sensor:
+  - platform: sendspin
+    type: title
+    name: Track Title
+  - platform: sendspin
+    type: artist
+    name: Track Artist
+
+# --- Red LED on PWM D -------------------------------------------------------
+
+output:
+  - platform: ledc
+    id: red_led_output
+    pin: ${red_led_pin}
+
+light:
+  - platform: monochromatic
+    id: red_led
+    name: Red LED
+    output: red_led_output
+    restore_mode: ALWAYS_OFF
+    effects:
+      - pulse:
+          name: Pulse
+          transition_length: 1s
+          update_interval: 1s
+      - flicker:
+          name: Flicker
+
+switch:
+  - platform: template
+    id: led_shows_playback
+    name: LED Shows Playback
+    icon: mdi:led-on
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: restart
+    name: Restart
+    entity_category: diagnostic
+
+# --- Diagnostics ------------------------------------------------------------
+
+# Free memory, internal and PSRAM.
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: debug
+    free:
+      id: heap_free
+      name: Heap Free
+      entity_category: diagnostic
+    block:
+      id: heap_block
+      name: Heap Largest Block
+      entity_category: diagnostic
+    min_free:
+      id: heap_min_free
+      name: Heap Lowest Free
+      entity_category: diagnostic
+    psram:
+      id: psram_free
+      name: PSRAM Free
+      entity_category: diagnostic
+  - platform: wifi_signal
+    name: Wi-Fi Signal
+    update_interval: 60s
+    entity_category: diagnostic
+
+# Sensor values only reach the log at VERBOSE; this puts memory in the log.
+interval:
+  - interval: 30s
+    then:
+      - logger.log:
+          level: INFO
+          tag: heap
+          format: "internal free %.0f, largest block %.0f, lowest free %.0f; PSRAM free %.0f"
+          args: [id(heap_free).state, id(heap_block).state, id(heap_min_free).state, id(psram_free).state]

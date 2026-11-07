@@ -5,3 +5,8 @@
 .vscode/ipch
 .vscode/settings.json
 .DS_Store
+
+# ESPHome build output and local secrets
+.esphome/
+secrets.yaml
+backup/
