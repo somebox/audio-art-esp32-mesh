@@ -116,6 +116,55 @@ plays, but out of sync: each receiver is its own stream in Music Assistant. A Mu
 Tested 2026-11-07 with Home Assistant 2026.11.0 and Music Assistant 2.11.0b8: playback from Music Assistant and
 AirPlay from a Mac, with track changes and grouping, for about 30 minutes without a crash or a dropped connection.
 
+## Open: 206ad8 stutters
+
+Installed with its LED and external antenna, `sendspin-node-206ad8` (the CJMCU-1334 node) plays with short
+interruptions and stutters, while `sendspin-node-dfce28` sounds clean on the same stream. Not solved yet. What is
+known (2026-11-07):
+
+- **The audio leaves the ESP32 intact.** On the debug build ([Reading a node's log](#reading-a-nodes-log)) it
+  played for 20 minutes, 12:00 to 12:20, and stuttered, but the node logged no "Lost sync", no underflow and no
+  dropped data. The Sendspin client times itself against the I2S speaker's reports of when audio finished
+  playing, and logs "Lost sync" when the output is more than 5 ms from where it should be, so the I2S output had
+  no gaps. The fault is somewhere between the I2S pins and the speaker: the wiring, the DAC module or its supply.
+- **Not Wi-Fi.** With the external antenna it is at −46 to −61 dBm (dfce28: −42). Before the antenna was fitted
+  it was at −82 to −89 dBm, and Music Assistant logged stalled sends and late chunks to it; it has logged none
+  since.
+- **Not roaming.** ESPHome scans for a better access point every 5 minutes while the signal is below −49 dBm, so
+  206ad8 scans and dfce28 doesn't. Sendspin holds the scans off during playback: the first one came as the stream
+  ended.
+
+To check next, in this order:
+
+1. The three I2S wires (BCLK, WSEL, DIN), for a loose contact.
+2. The six control-pin ground wires, MUTE and PLL above all. A floating MUTE mutes the DAC; a floating PLL takes
+   away its clock.
+3. The LED, whose PWM on GPIO33 runs at 50% during playback. Turn off `LED Shows Playback` and the light, and
+   listen.
+4. The 5 V supply.
+
+## Reading a node's log
+
+Home Assistant sets the API encryption key when it adopts a node, so `esphome logs` from another machine can't
+connect to an adopted node. [`sendspin-node-syslog.yaml`](sendspin-node-syslog.yaml) is the same firmware with
+its log also sent as UDP syslog to `log_host` (set it to the listening machine's address). Flash it over Wi-Fi,
+listen on UDP port 5514, and flash `sendspin-node.yaml` back when done:
+
+```bash
+esphome run sendspin-node-syslog.yaml --device sendspin-node-XXXXXX.local
+python3 -c '
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.bind(("", 5514))
+while True:
+    print(s.recv(4096).decode(errors="replace"), flush=True)
+'
+esphome run sendspin-node.yaml --device sendspin-node-XXXXXX.local
+```
+
+The node restarts on each flash. If it was leading a Music Assistant group, the group's stream stops; pause and
+play the group to start it again. `nc -ul 5514` also receives the log, but runs the lines together.
+
 ## Memory
 
 **Use an ESP32 with a WROVER module (PSRAM).** The config sets `psram: ignore_not_found: false`, so on a WROOM

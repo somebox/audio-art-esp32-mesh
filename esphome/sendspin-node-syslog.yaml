@@ -1,0 +1,28 @@
+# Debug build: sendspin-node.yaml plus its log sent over UDP syslog.
+#
+# Home Assistant sets the API encryption key when it adopts a node, so
+# `esphome logs` from another machine can't connect to an adopted node. This
+# build sends the log to log_host instead. Flash it over Wi-Fi, listen on UDP
+# 5514, and flash sendspin-node.yaml back afterwards (README.md, "Reading a
+# node's log").
+#
+#   esphome run sendspin-node-syslog.yaml --device sendspin-node-XXXXXX.local
+
+substitutions:
+  # The machine that listens for the log.
+  log_host: 192.168.1.50
+
+packages:
+  base: !include sendspin-node.yaml
+
+time:
+  - platform: sntp
+    id: sntp_time
+
+udp:
+  addresses:
+    - ${log_host}
+
+syslog:
+  port: 5514
+  level: DEBUG
