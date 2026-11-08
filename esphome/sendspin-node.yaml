@@ -33,8 +33,9 @@ substitutions:
   # HA Proto SW1 (the devkit's BOOT line)
   button_pin: GPIO0
   # Carrier pins left free: I2C SDA 21 / SCL 22; SPI CLK 18, MOSI 23,
-  # MISO 19, CS 5; WS2812 out and PWM C on GPIO5 (J11, J7). PWM A and B sit
-  # on GPIO16/17, the WROVER's PSRAM lines, so they can't be used here.
+  # MISO 19, CS 5; WS2812 out and PWM C on GPIO5 (J11, J7), used by
+  # sendspin-node-led-strip.yaml. PWM A and B sit on GPIO16/17, the WROVER's
+  # PSRAM lines, so they can't be used here.
 
 esphome:
   name: ${name}
@@ -185,6 +186,10 @@ output:
   - platform: ledc
     id: red_led_output
     pin: ${red_led_pin}
+    # Above hearing. At ESPHome's default 1 kHz the LED's switched current
+    # was heard as a whine in the amplified speakers whenever the LED was
+    # dimmed. 40 kHz still leaves 10-bit dimming.
+    frequency: 40kHz
 
 light:
   - platform: monochromatic

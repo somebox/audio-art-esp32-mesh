@@ -1,0 +1,95 @@
+# sendspin-node.yaml plus a WS2812 strip that follows the music.
+#
+# The strip is on the carrier's WS2812 output (CN9, from GPIO5 through J11 and
+# the 3.3 V to 5 V buffer). Open J7, or PWM C switches with the strip's data.
+# Music Assistant sends loudness, a spectrum, onsets and beats for the audio
+# it streams (Sendspin's visualizer role); components/sendspin_visualizer
+# receives them and draws the effects. Pick one in Home Assistant:
+#
+#   Music Spectrum  one LED per band, bass (red) to treble (violet)
+#   Music Level     a level meter from the middle outwards
+#   Music Beat      the strip flashes and changes colour on each beat
+#
+#   esphome run sendspin-node-led-strip.yaml --device sendspin-node-XXXXXX.local
+
+substitutions:
+  strip_pin: GPIO5
+  strip_leds: "34"
+
+packages:
+  base: !include sendspin-node.yaml
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [sendspin_visualizer]
+
+sendspin_visualizer:
+  id: music
+  # One band per LED.
+  spectrum_bins: ${strip_leds}
+  rate_max: 30
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_strip
+    output_id: led_strip_output
+    name: LED Strip
+    pin:
+      number: ${strip_pin}
+      # Sampled at reset only for the SDIO slave timing, which isn't used.
+      ignore_strapping_warning: true
+    num_leds: ${strip_leds}
+    chipset: WS2812
+    channel_colors: GRB
+    # 34 bytes of LED data: internal RAM is enough.
+    use_psram: false
+    restore_mode: RESTORE_DEFAULT_OFF
+    # The brightness limit. Strip Brightness Limit below sets it at boot and
+    # whenever it changes; this is only its default.
+    color_correct: [25%, 25%, 25%]
+    effects:
+      - addressable_lambda:
+          name: Music Spectrum
+          lambda: id(music).render_spectrum(it);
+      - addressable_lambda:
+          name: Music Level
+          lambda: id(music).render_level(it);
+      - addressable_lambda:
+          name: Music Beat
+          lambda: id(music).render_beat(it);
+      - addressable_rainbow:
+          name: Rainbow
+
+number:
+  # Caps the strip, effects included: at 100% in Home Assistant it shows this
+  # brightness. ESPHome applies its gamma (2.8) after the cap, so the current
+  # falls much faster than the number: full white draws about 2 A at 100%,
+  # 0.3 A at 50%, 45 mA at 25%. 206ad8 hung at full red with a 50% cap
+  # (about 0.1 A).
+  - platform: template
+    id: strip_brightness_limit
+    name: Strip Brightness Limit
+    icon: mdi:brightness-percent
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 5
+    max_value: 100
+    step: 5
+    initial_value: 25
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: |-
+          const float limit = x / 100.0f;
+          id(led_strip_output).set_correction(limit, limit, limit);
+      # Redraw a plain colour with the new limit; the effects redraw on
+      # their own. At boot the light isn't on yet, so this is skipped.
+      - if:
+          condition:
+            lambda: return id(led_strip).remote_values.is_on() && id(led_strip).get_current_effect_index() == 0;
+          then:
+            - light.turn_on:
+                id: led_strip
+                transition_length: 0s

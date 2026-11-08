@@ -65,9 +65,9 @@ What went wrong on the first build (2026-11-07):
 | Function              | GPIO           | On the HA Proto                     | In this firmware                     |
 | --------------------- | -------------- | ----------------------------------- | ------------------------------------ |
 | I2S to the DAC        | 27, 26, 25     | devkit header / test pads           | speaker, 48 kHz 16-bit stereo        |
-| PWM D                 | 33             | J8 bridged, MOSFET to HVCC          | `Red LED` light, lit while playing   |
+| PWM D                 | 33             | J8 bridged, MOSFET to HVCC          | `Red LED` light, lit while playing, PWM at 40 kHz |
 | Button                | 0              | SW1 (also the devkit's BOOT)        | play/pause                           |
-| PWM C / WS2812 out    | 5              | J7 / J11 (both bridged now)         | free                                 |
+| PWM C / WS2812 out    | 5              | J7 / J11 (both bridged now)         | `LED Strip` on 206ad8 ([LED strip](#led-strip)); free on dfce28 |
 | I2C                   | SDA 21, SCL 22 | 3.3 V and 5 V headers, 4.7 kΩ pull-ups | free                              |
 | SPI                   | CLK 18, MOSI 23, MISO 19, CS 5 | H6 via the 74HCT125, J1–J4 | free                                 |
 | PWM A / PWM B         | 16 / 17        | J5 / J6                             | **unusable on a WROVER** (PSRAM)     |
@@ -116,6 +116,60 @@ plays, but out of sync: each receiver is its own stream in Music Assistant. A Mu
 Tested 2026-11-07 with Home Assistant 2026.11.0 and Music Assistant 2.11.0b8: playback from Music Assistant and
 AirPlay from a Mac, with track changes and grouping, for about 30 minutes without a crash or a dropped connection.
 
+## LED strip
+
+`sendspin-node-206ad8` drives a WS2812 board of 34 LEDs: data from GPIO5 through a separate 3.3 V to 5 V level
+shifter, VCC on 5 V. With VCC on 3.3 V and the data wired straight to GPIO5 it stayed dark. The carrier's WS2812
+output (CN9, GPIO5 through J11 and its own 3.3 V to 5 V buffer) would do the level shifter's job.
+[`sendspin-node-led-strip.yaml`](sendspin-node-led-strip.yaml) is `sendspin-node.yaml` plus the strip:
+
+```bash
+esphome run sendspin-node-led-strip.yaml --device sendspin-node-206ad8.local
+```
+
+Open J7, or PWM C's MOSFET switches with the strip's data. The strip is the `LED Strip` light in Home Assistant,
+with three effects that follow the music, and a rainbow:
+
+| Effect         | Shows                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------- |
+| Music Spectrum | one LED per band, 40 Hz to 16 kHz, red for the bass to violet for the treble            |
+| Music Level    | a level meter from the middle outwards, green to red, with a falling peak dot           |
+| Music Beat     | the whole strip flashes and steps to the next colour on each beat, brighter on downbeats |
+
+The music data comes from Music Assistant, not from the node: Sendspin's visualizer role. Music Assistant analyses
+the audio it streams and sends loudness, a spectrum and onsets (transients) about 30 times a second, and beats
+once its audio analysis has the track, each stamped with the time it plays. The node shows each value at that
+time, so the strip stays in step with the speakers and with the other players in a group. Music Beat flashes on
+the stronger onsets until beats arrive. Each effect scales to the music's recent peak (each band to its own for
+the spectrum), so it fills the strip at any volume; the node's volume doesn't change it.
+
+[`components/sendspin_visualizer`](components/sendspin_visualizer) receives the data and draws the effects.
+ESPHome 2026.10.2 can ask for the visualizer role but never adds it to the Sendspin client; the open pull request
+[esphome/esphome#19276](https://github.com/esphome/esphome/pull/19276) does. Until that is in a release, the
+component reaches into the hub to add the role itself (see the top of `sendspin_visualizer.cpp`); after it, the
+component should call the hub's `set_visualizer()` instead.
+
+**Brightness limit.** `Strip Brightness Limit` (a setting on the device in Home Assistant, 25% by default) caps
+the strip, effects included: at 100% the strip shows the limit's brightness. ESPHome applies its gamma (2.8)
+after the cap, so the current falls much faster than the number: full white draws about 2 A uncapped, 0.3 A at
+50% and 45 mA at 25%; one colour alone draws a third of that.
+
+**206ad8 hangs when the strip draws more than a little.** At full brightness (red, then with a 50% cap: about
+0.1 A from the 5 V) the board hung several times on 2026-11-08: its log stopped, with no reboot, and only a power
+cycle brought it back. Red at 34% brightness, a few mA, ran steadily, and so did full red and full white with the
+25% limit, three minutes each. A WS2812 board this size should draw 0.1 A without trouble, so 206ad8's 5 V supply or its
+wiring is weak, which may also be the cause of its stutters ([below](#open-206ad8-stutters), item 4). To check:
+measure the 5 V at the board with the strip lit; wire the strip's 5 V and ground straight to the supply, not
+through the devkit; and add a capacitor of 470 µF or more across the strip's 5 V and ground.
+
+The WS2812's own PWM runs at a fixed rate in the audio band (about 0.4 to 2 kHz, depending on the version), and
+can't be moved like the red LED's. If the strip is heard in the speakers, the same fixes apply: its own 5 V supply,
+or at least its own ground wire back to the supply, and the capacitor at the strip.
+
+Tested 2026-11-08 with Music Assistant 2.11.0b8 (aiosendspin 10.2.2), playing a podcast: the stream started with
+loudness, onsets and a 34-band spectrum at 30 frames a second, and no beats, as expected for speech. Memory during
+playback: 134 KB internal free, 1.8 MB PSRAM free. Not yet seen: beats on music, and how the effects look.
+
 ## Open: 206ad8 stutters
 
 Installed with its LED and external antenna, `sendspin-node-206ad8` (the CJMCU-1334 node) plays with short
@@ -140,7 +194,8 @@ To check next, in this order:
 2. The six control-pin ground wires, MUTE and PLL above all. A floating MUTE mutes the DAC; a floating PLL takes
    away its clock.
 3. The LED, whose PWM on GPIO33 runs at 50% during playback. Turn off `LED Shows Playback` and the light, and
-   listen.
+   listen. Its PWM ran at ESPHome's default 1 kHz, and a dimmed LED was heard as a whine in the speakers; it runs
+   at 40 kHz since 2026-11-08.
 4. The 5 V supply.
 
 ## Reading a node's log
