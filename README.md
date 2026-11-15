@@ -1,5 +1,10 @@
 # Audio Art Installation
 
+> **Legacy project.** This is the 2022 installation and it is no longer developed. To play audio on ESP32 nodes
+> today, see [esphome-sendspin-node](https://github.com/somebox/esphome-sendspin-node): ESPHome firmware that turns
+> an ESP32 with an I2S DAC into a Sendspin player for Music Assistant, in sync across rooms, with LED effects that
+> follow the music. It uses the same I2S pins as these boards.
+
 > ESP32 devices connected via a mesh network, which are synchronized for an audio performance. The subject is a conversation about art between a real artist, Edward Wright, and the GPT-3 AI model from OpenAI. This exhibition was held in Luzern, Switzerland in February 2022.
 
 ![overview](https://github.com/user-attachments/assets/ed0aa335-646f-4f82-90ed-5623edccc0ba)
