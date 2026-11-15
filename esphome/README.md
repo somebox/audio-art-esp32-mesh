@@ -67,7 +67,7 @@ What went wrong on the first build (2026-11-07):
 | I2S to the DAC        | 27, 26, 25     | devkit header / test pads           | speaker, 48 kHz 16-bit stereo        |
 | PWM D                 | 33             | J8 bridged, MOSFET to HVCC          | `Red LED` light, lit while playing, PWM at 40 kHz |
 | Button                | 0              | SW1 (also the devkit's BOOT)        | play/pause                           |
-| PWM C / WS2812 out    | 5              | J7 / J11 (both bridged now)         | `LED Strip` on 206ad8 ([LED strip](#led-strip)); free on dfce28 |
+| PWM C / WS2812 out    | 5              | J7 / J11 (both bridged now)         | `LED Strip` (a 4×4 matrix) on 206ad8 ([LED matrix](#led-matrix)); free on dfce28 |
 | I2C                   | SDA 21, SCL 22 | 3.3 V and 5 V headers, 4.7 kΩ pull-ups | free                              |
 | SPI                   | CLK 18, MOSI 23, MISO 19, CS 5 | H6 via the 74HCT125, J1–J4 | free                                 |
 | PWM A / PWM B         | 16 / 17        | J5 / J6                             | **unusable on a WROVER** (PSRAM)     |
@@ -116,32 +116,62 @@ plays, but out of sync: each receiver is its own stream in Music Assistant. A Mu
 Tested 2026-11-07 with Home Assistant 2026.11.0 and Music Assistant 2.11.0b8: playback from Music Assistant and
 AirPlay from a Mac, with track changes and grouping, for about 30 minutes without a crash or a dropped connection.
 
-## LED strip
+## LED matrix
 
-`sendspin-node-206ad8` drives a WS2812 board of 34 LEDs: data from GPIO5 through a separate 3.3 V to 5 V level
-shifter, VCC on 5 V. With VCC on 3.3 V and the data wired straight to GPIO5 it stayed dark. The carrier's WS2812
-output (CN9, GPIO5 through J11 and its own 3.3 V to 5 V buffer) would do the level shifter's job.
-[`sendspin-node-led-strip.yaml`](sendspin-node-led-strip.yaml) is `sendspin-node.yaml` plus the strip:
+`sendspin-node-206ad8` drives a 4×4 WS2812 matrix: data from GPIO5 through a separate 3.3 V to 5 V level shifter,
+VCC on 5 V, and a 470 µF capacitor at the LED output. Its first LED, the one the data wire goes to, is the
+top-right one. (It drove a 34-LED strip before; with that strip's VCC on 3.3 V and the data wired straight to
+GPIO5 it stayed dark.) The carrier's WS2812 output (CN9, GPIO5 through J11 and its own 3.3 V to 5 V buffer) would do
+the level shifter's job. [`sendspin-node-led-strip.yaml`](sendspin-node-led-strip.yaml) is `sendspin-node.yaml`
+plus the matrix:
 
 ```bash
 esphome run sendspin-node-led-strip.yaml --device sendspin-node-206ad8.local
 ```
 
-Open J7, or PWM C's MOSFET switches with the strip's data. The strip is the `LED Strip` light in Home Assistant,
-with three effects that follow the music, and a rainbow:
+Open J7, or PWM C's MOSFET switches with the data. The matrix is the `LED Strip` light in Home Assistant, with
+three effects that follow the music, a test pattern and a rainbow:
 
-| Effect         | Shows                                                                                   |
-| -------------- | --------------------------------------------------------------------------------------- |
-| Music Spectrum | one LED per band, 40 Hz to 16 kHz, red for the bass to violet for the treble            |
-| Music Level    | a level meter from the middle outwards, green to red, with a falling peak dot           |
-| Music Beat     | the whole strip flashes and steps to the next colour on each beat, brighter on downbeats |
+| Effect         | Shows                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| Music Spectrum | four bars rising from the bottom row, bass on the left (red) to treble on the right (violet)  |
+| Music Level    | a level meter in rings from the centre, green to yellow to red, with a falling peak ring      |
+| Music Beat     | on each beat (or kick) a flash spreads from the centre to the corners, in the next colour     |
+| Matrix Test    | a dot that reads along each row, top row first, with the top-left LED kept dim red           |
+
+**Matrix layout.** The `matrix:` settings of `sendspin_visualizer` map the grid to the LED order: its size, the
+corner of the first LED (`first_pixel`), whether the second LED is beside it (`order: rows`) or above or below it
+(`columns`), and whether each row runs the other way from the one before (`serpentine`). The config assumes rows
+that all start at the right. Matrix Test shows whether that matches the wiring: the dim red LED should be top left
+and the dot should move left to right, row after row from the top. Without `matrix:` the effects draw along a
+strip instead. The four spectrum bands use a log scale, about 40, 180, 800 and 3600 Hz up to 16 kHz; the default
+mel scale would put three of the four above 900 Hz.
+
+**Colour order.** This matrix takes its colour bytes as blue, green, red (`channel_colors: BGR`). With the usual
+GRB, red showed as green and green as blue. Matrix Test shows red, green, blue and white rows from the top.
+
+**White flashes in the effects (open).** Plain colours are steady, but the effects show bright white flashes. A
+plain colour is sent once; an effect sends a frame every 16 ms, so a rare bad frame shows up as a flash. Two
+firmware causes are ruled out: the effects first redrew on every pass of the main loop (hundreds of frames a
+second), and ESPHome's driver refilled its RMT memory from an interrupt in the middle of each frame. Both are fixed
+(`update_interval: 16ms`, `rmt_symbols: 512`), and the flashes stayed. They came less often with quieter music, and
+they depend on the effect: Music Spectrum flashes, Music Level hardly, Music Beat (mostly dark between flashes) not
+at all. That looked like the ground wiring, but ESPHome's Rainbow is steady while it lights every LED and redraws
+on every pass of the loop, so the wiring and the driver cope with busy frames; the cause is more likely in what the
+effects write. Every 10 seconds the log now reports the frames drawn, the brightest byte written and the frames
+with a pixel in all three colours (white). Not yet read with Music Spectrum running.
 
 The music data comes from Music Assistant, not from the node: Sendspin's visualizer role. Music Assistant analyses
 the audio it streams and sends loudness, a spectrum and onsets (transients) about 30 times a second, and beats
 once its audio analysis has the track, each stamped with the time it plays. The node shows each value at that
-time, so the strip stays in step with the speakers and with the other players in a group. Music Beat flashes on
-the stronger onsets until beats arrive. Each effect scales to the music's recent peak (each band to its own for
-the spectrum), so it fills the strip at any volume; the node's volume doesn't change it.
+time, so the LEDs stay in step with the speakers and with the other players in a group.
+
+**Beats need Smart Fades.** Music Assistant sends beats only when its Smart Fades audio-analysis provider is
+installed (Settings → Providers; it isn't built in) and has analysed the track, which takes it 5 to 10 seconds
+with a neural beat tracker. Without it the stream has no beats. Music Beat then flashes on kicks instead: the
+lowest spectrum band (40 to 180 Hz) jumping 4 dB above its average of the last 0.4 s, at most every 250 ms. It
+first flashed on every onset, hi-hats and voices included, and didn't follow the beat. Each effect scales to the music's recent peak (each band to its own for the
+spectrum), so it fills the matrix at any volume; the node's volume doesn't change it.
 
 [`components/sendspin_visualizer`](components/sendspin_visualizer) receives the data and draws the effects.
 ESPHome 2026.10.2 can ask for the visualizer role but never adds it to the Sendspin client; the open pull request
@@ -150,25 +180,27 @@ component reaches into the hub to add the role itself (see the top of `sendspin_
 component should call the hub's `set_visualizer()` instead.
 
 **Brightness limit.** `Strip Brightness Limit` (a setting on the device in Home Assistant, 25% by default) caps
-the strip, effects included: at 100% the strip shows the limit's brightness. ESPHome applies its gamma (2.8)
-after the cap, so the current falls much faster than the number: full white draws about 2 A uncapped, 0.3 A at
-50% and 45 mA at 25%; one colour alone draws a third of that.
+the LEDs, effects included: at 100% they show the limit's brightness. ESPHome applies its gamma (2.8) after the
+cap, so the current falls much faster than the number: 16 LEDs at full white draw about 1 A uncapped, 0.14 A at
+50% and 20 mA at 25%; one colour alone draws a third of that.
 
-**206ad8 hangs when the strip draws more than a little.** At full brightness (red, then with a 50% cap: about
-0.1 A from the 5 V) the board hung several times on 2026-11-08: its log stopped, with no reboot, and only a power
-cycle brought it back. Red at 34% brightness, a few mA, ran steadily, and so did full red and full white with the
-25% limit, three minutes each. A WS2812 board this size should draw 0.1 A without trouble, so 206ad8's 5 V supply or its
-wiring is weak, which may also be the cause of its stutters ([below](#open-206ad8-stutters), item 4). To check:
-measure the 5 V at the board with the strip lit; wire the strip's 5 V and ground straight to the supply, not
-through the devkit; and add a capacitor of 470 µF or more across the strip's 5 V and ground.
+**206ad8 hung when the LEDs drew more than a little.** With the 34-LED strip at full brightness (red, then with a
+50% cap: about 0.1 A from the 5 V) the board hung several times on 2026-11-08: its log stopped, with no reboot,
+and only a power cycle brought it back. Red at 34% brightness, a few mA, ran steadily, and so did full red and
+full white with the 25% limit, three minutes each. LEDs should draw 0.1 A without trouble, so 206ad8's 5 V supply
+or its wiring is weak, which may also be the cause of its stutters ([below](#open-206ad8-stutters), item 4). The
+470 µF capacitor went in afterwards; whether the board now takes a higher limit is not tested yet. Still to
+check: the 5 V at the board with the LEDs lit, and the LEDs' 5 V and ground wired straight to the supply rather
+than through the devkit.
 
 The WS2812's own PWM runs at a fixed rate in the audio band (about 0.4 to 2 kHz, depending on the version), and
-can't be moved like the red LED's. If the strip is heard in the speakers, the same fixes apply: its own 5 V supply,
-or at least its own ground wire back to the supply, and the capacitor at the strip.
+can't be moved like the red LED's. If the LEDs are heard in the speakers, the same fixes apply: their own 5 V
+supply, or at least their own ground wire back to the supply, and the capacitor at the LEDs.
 
-Tested 2026-11-08 with Music Assistant 2.11.0b8 (aiosendspin 10.2.2), playing a podcast: the stream started with
-loudness, onsets and a 34-band spectrum at 30 frames a second, and no beats, as expected for speech. Memory during
-playback: 134 KB internal free, 1.8 MB PSRAM free. Not yet seen: beats on music, and how the effects look.
+Tested 2026-11-08 with Music Assistant 2.11.0b8 (aiosendspin 10.2.2), on the 34-LED strip, playing a podcast: the
+stream started with loudness, onsets and a 34-band spectrum at 30 frames a second, and no beats, as expected for
+speech. Memory during playback: 134 KB internal free, 1.8 MB PSRAM free. On the matrix: plain colours and brightness work,
+the effects flash (above), and the layout is not yet checked with Matrix Test. Beats on music not yet seen.
 
 ## Open: 206ad8 stutters
 

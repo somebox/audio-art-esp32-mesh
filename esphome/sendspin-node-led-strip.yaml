@@ -1,20 +1,26 @@
-# sendspin-node.yaml plus a WS2812 strip that follows the music.
+# sendspin-node.yaml plus a 4x4 WS2812 matrix that follows the music.
 #
-# The strip is on the carrier's WS2812 output (CN9, from GPIO5 through J11 and
-# the 3.3 V to 5 V buffer). Open J7, or PWM C switches with the strip's data.
-# Music Assistant sends loudness, a spectrum, onsets and beats for the audio
-# it streams (Sendspin's visualizer role); components/sendspin_visualizer
-# receives them and draws the effects. Pick one in Home Assistant:
+# The matrix's data comes from GPIO5 through a 3.3 V to 5 V level shifter, and
+# its VCC is on 5 V. Open J7, or PWM C switches with the data. Music Assistant
+# sends loudness, a spectrum, onsets and beats for the audio it streams
+# (Sendspin's visualizer role); components/sendspin_visualizer receives them
+# and draws the effects. Pick one in Home Assistant:
 #
-#   Music Spectrum  one LED per band, bass (red) to treble (violet)
-#   Music Level     a level meter from the middle outwards
-#   Music Beat      the strip flashes and changes colour on each beat
+#   Music Spectrum  four bars, bass on the left (red) to treble (violet)
+#   Music Level     a level meter in rings from the centre, green to red
+#   Music Beat      a flash from the centre outwards on each beat, changing colour
+#   Matrix Test     rows of red, green, blue and white from the top, with a dark
+#                   dot that reads along each row, top row first; if it shows
+#                   otherwise, fix channel_colors or the matrix settings
 #
 #   esphome run sendspin-node-led-strip.yaml --device sendspin-node-XXXXXX.local
 
 substitutions:
   strip_pin: GPIO5
-  strip_leds: "34"
+  matrix_width: "4"
+  matrix_height: "4"
+  # matrix_width x matrix_height
+  strip_leds: "16"
 
 packages:
   base: !include sendspin-node.yaml
@@ -27,9 +33,19 @@ external_components:
 
 sendspin_visualizer:
   id: music
-  # One band per LED.
-  spectrum_bins: ${strip_leds}
+  # One band per column, spread evenly over bass, mids and treble.
+  spectrum_bins: ${matrix_width}
+  spectrum_scale: log
   rate_max: 30
+  matrix:
+    width: ${matrix_width}
+    height: ${matrix_height}
+    # The data wire goes to the top-right LED. Pixel 2 is assumed to be beside
+    # it in the same row, and every row to start at the right; Matrix Test
+    # shows whether that holds (else try order: columns, or serpentine: true).
+    first_pixel: top_right
+    order: rows
+    serpentine: false
 
 light:
   - platform: esp32_rmt_led_strip
@@ -42,32 +58,50 @@ light:
       ignore_strapping_warning: true
     num_leds: ${strip_leds}
     chipset: WS2812
-    channel_colors: GRB
-    # 34 bytes of LED data: internal RAM is enough.
+    # This matrix takes blue, green, red; with the usual GRB, red showed as
+    # green and green as blue.
+    channel_colors: BGR
+    # 48 bytes of LED data: internal RAM is enough.
     use_psram: false
+    # All of the ESP32's RMT memory, so a whole frame (16 x 24 bits and the
+    # end) is written before it is sent. With the default 192 the driver
+    # refills it from an interrupt mid-frame, and a late refill garbles it.
+    rmt_symbols: 512
     restore_mode: RESTORE_DEFAULT_OFF
     # The brightness limit. Strip Brightness Limit below sets it at boot and
     # whenever it changes; this is only its default.
     color_correct: [25%, 25%, 25%]
+    # The effects redraw at most every 16 ms (the data comes 30 times a
+    # second). Left at 0 they redraw on every pass of the main loop, which
+    # Sendspin wakes from its own threads, so the matrix got far more frames;
+    # it showed bright white flashes in the effects then, and not in plain
+    # colours.
     effects:
       - addressable_lambda:
           name: Music Spectrum
+          update_interval: 16ms
           lambda: id(music).render_spectrum(it);
       - addressable_lambda:
           name: Music Level
+          update_interval: 16ms
           lambda: id(music).render_level(it);
       - addressable_lambda:
           name: Music Beat
+          update_interval: 16ms
           lambda: id(music).render_beat(it);
+      - addressable_lambda:
+          name: Matrix Test
+          update_interval: 16ms
+          lambda: id(music).render_test(it);
       - addressable_rainbow:
           name: Rainbow
 
 number:
-  # Caps the strip, effects included: at 100% in Home Assistant it shows this
+  # Caps the LEDs, effects included: at 100% in Home Assistant they show this
   # brightness. ESPHome applies its gamma (2.8) after the cap, so the current
-  # falls much faster than the number: full white draws about 2 A at 100%,
-  # 0.3 A at 50%, 45 mA at 25%. 206ad8 hung at full red with a 50% cap
-  # (about 0.1 A).
+  # falls much faster than the number: 16 LEDs at full white draw about 1 A
+  # at 100%, 0.14 A at 50%, 20 mA at 25%. 206ad8 hung with the 34-LED strip
+  # at full red and a 50% cap (about 0.1 A).
   - platform: template
     id: strip_brightness_limit
     name: Strip Brightness Limit
